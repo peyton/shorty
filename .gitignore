@@ -1,0 +1,44 @@
+.venv-eval/
+.venv/
+__pycache__/
+.pytest_cache/
+.cache/
+.config/
+.state/
+.build/
+data/raw/
+data/processed/cache/
+
+# Local logs
+*.log
+
+# Local Cloudflare secrets
+infra/cloudflare/.env
+
+# Local Codex state
+.codex/environments/
+.codex/config.toml
+
+# Xcode local/build artifacts
+.DerivedData/
+*.xcactivitylog
+*.xcuserstate
+app/Sunclub.xcodeproj/xcuserdata/
+app/Sunclub.xcworkspace/
+app/Tuist/Dependencies/
+app/build/
+
+# macOS
+.DS_Store
+
+# Claude
+.claude/
+
+# mise
+.mise/
+!/bin
+/bin/*
+!/bin/mise
+
+# rumdl
+.rumdl_cache/
