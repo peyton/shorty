@@ -159,7 +159,7 @@ Repository:
 
 `AdapterRegistry` loads built-in adapters first, then reviewed user adapters from `~/Library/Application Support/Shorty/Adapters/`. Adapter loading and saving run through validation and rebuild an indexed shortcut resolver for fast effective-app lookups.
 
-`IntentMatcher` is intentionally conservative for auto adapters. It accepts exact aliases, exact key combos, or scores at least `0.70`, and rejects close competing matches with a margin below `0.20`.
+`IntentMatcher` is intentionally conservative for auto adapters. It accepts exact aliases, key combos with supporting menu text, or scores at least `0.70`, and rejects close competing matches with a margin below `0.20`.
 
 `EventTapManager` intercepts canonical keyDown events and either remaps the event, invokes a menu item through Accessibility, performs an AX action, or passes the event through unchanged.
 
