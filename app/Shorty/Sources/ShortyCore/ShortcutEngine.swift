@@ -606,9 +606,10 @@ public final class ShortcutEngine: ObservableObject {
             grouping: adapters,
             by: { $0.source.rawValue }
         ).mapValues(\.count)
+        let appSnapshot = appMonitor.snapshot()
         let activeAvailability = registry.availability(
-            for: appMonitor.effectiveAppID,
-            displayName: appMonitor.currentAppName
+            for: appSnapshot.effectiveAppID,
+            displayName: appSnapshot.currentAppName
         )
 
         eventTap.flushPendingDiagnostics()

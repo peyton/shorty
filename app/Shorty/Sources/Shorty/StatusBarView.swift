@@ -1,16 +1,28 @@
 import AppKit
+import Combine
 import ShortyCore
 import SwiftUI
 
 struct StatusBarView: View {
-    @ObservedObject var engine: ShortcutEngine
+    @StateObject private var snapshotStore: StatusBarSnapshotStore
+    private let engine: ShortcutEngine
+
+    init(engine: ShortcutEngine) {
+        self.engine = engine
+        _snapshotStore = StateObject(
+            wrappedValue: StatusBarSnapshotStore(engine: engine)
+        )
+    }
 
     var body: some View {
         StatusBarContentView(
-            snapshot: .live(engine: engine),
+            snapshot: snapshotStore.snapshot,
             eventTapEnabled: eventTapEnabledBinding,
             actions: .live(engine: engine)
         )
+        .onAppear {
+            snapshotStore.refreshFromFrontmostApplication()
+        }
     }
 
     private var eventTapEnabledBinding: Binding<Bool> {
@@ -18,6 +30,111 @@ struct StatusBarView: View {
             get: { engine.eventTap.isEnabled },
             set: { engine.eventTap.isEnabled = $0 }
         )
+    }
+}
+
+final class StatusBarSnapshotStore: ObservableObject {
+    @Published private(set) var snapshot: StatusBarSnapshot
+
+    private let engine: ShortcutEngine
+    private var cancellables = Set<AnyCancellable>()
+    private var refreshScheduled = false
+
+    init(engine: ShortcutEngine) {
+        self.engine = engine
+        self.snapshot = StatusBarSnapshot.live(engine: engine)
+        bind()
+    }
+
+    func refreshFromFrontmostApplication() {
+        engine.appMonitor.refreshActiveApplication()
+        engine.refreshDailyStatuses()
+        refresh()
+    }
+
+    private func bind() {
+        observe(engine.$status) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$permissionState) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$isWaitingForAccessibilityPermission) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$safariExtensionStatus) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$shortcutProfile) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$generatedAdapterPreview) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$adapterGenerationMessage) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+
+        observe(engine.appMonitor.$currentBundleID) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.appMonitor.$currentAppName) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.appMonitor.$webAppDomain) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.appMonitor.$browserContextSource) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+
+        observe(engine.registry.$adapters) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.registry.$validationMessages) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+
+        observe(engine.eventTap.$isEnabled) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.eventTap.$counters) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.eventTap.$lifecycleMessage) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+
+        if let browserBridge = engine.browserBridge {
+            observe(browserBridge.$status) { [weak self] _ in
+                self?.scheduleRefresh()
+            }
+        }
+    }
+
+    private func observe<P: Publisher>(
+        _ publisher: P,
+        receiveValue: @escaping (P.Output) -> Void
+    ) where P.Failure == Never {
+        publisher
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink(receiveValue: receiveValue)
+            .store(in: &cancellables)
+    }
+
+    private func scheduleRefresh() {
+        guard !refreshScheduled else { return }
+        refreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.refreshScheduled = false
+            self.refresh()
+        }
+    }
+
+    private func refresh() {
+        snapshot = StatusBarSnapshot.live(engine: engine)
     }
 }
 
@@ -65,7 +182,10 @@ struct StatusBarSnapshot {
     static func live(engine: ShortcutEngine) -> StatusBarSnapshot {
         let appSnapshot = engine.appMonitor.snapshot()
         let appID = appSnapshot.effectiveAppID
-        let activeTitle = activeContextTitle(engine: engine, appID: appID)
+        let activeTitle = activeContextTitle(
+            engine: engine,
+            appSnapshot: appSnapshot
+        )
         let availability = engine.registry.availability(
             for: appID,
             displayName: activeTitle
@@ -112,11 +232,11 @@ struct StatusBarSnapshot {
 
     private static func activeContextTitle(
         engine: ShortcutEngine,
-        appID: String?
+        appSnapshot: AppMonitor.Snapshot
     ) -> String {
-        let appName = engine.appMonitor.currentAppName ?? "Unknown"
-        guard let domain = engine.appMonitor.webAppDomain,
-              let appID,
+        let appName = appSnapshot.currentAppName ?? "Unknown"
+        guard let domain = appSnapshot.webAppDomain,
+              let appID = appSnapshot.effectiveAppID,
               appID.hasPrefix("web:")
         else {
             return appName

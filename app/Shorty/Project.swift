@@ -185,6 +185,22 @@ let project = Project(
             settings: targetSettings()
         ),
         .target(
+            name: "ShortyTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "app.peyton.shorty.ShortyTests",
+            deploymentTargets: defaultDeploymentTarget,
+            infoPlist: .default,
+            sources: [
+                "Tests/ShortyTests/**"
+            ],
+            dependencies: [
+                .target(name: "Shorty"),
+                .target(name: "ShortyCore")
+            ],
+            settings: targetSettings()
+        ),
+        .target(
             name: "ShortyCoreTests",
             destinations: .macOS,
             product: .unitTests,
