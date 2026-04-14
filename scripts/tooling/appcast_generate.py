@@ -10,6 +10,7 @@ from pathlib import Path
 
 from scripts.tooling.package_app import (
     DEFAULT_OUTPUT_DIR,
+    AppPackageError,
     sha256_file,
     validate_package_version,
 )
@@ -98,13 +99,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-unsigned", action="store_true")
     args = parser.parse_args(argv)
 
-    version = validate_package_version(args.version)
-    archive_path = (
-        Path(args.archive_path)
-        if args.archive_path
-        else (DEFAULT_OUTPUT_DIR / f"shorty-{version}-macos.zip")
-    )
     try:
+        version = validate_package_version(args.version)
+        archive_path = (
+            Path(args.archive_path)
+            if args.archive_path
+            else (DEFAULT_OUTPUT_DIR / f"shorty-{version}-macos.zip")
+        )
         output_path = generate_appcast(
             version=version,
             archive_path=archive_path,
@@ -114,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
             allow_unsigned=args.allow_unsigned,
             source_url=args.source_url,
         )
-    except AppcastGenerateError as error:
+    except (AppPackageError, AppcastGenerateError) as error:
         print(f"ERROR: {error}")
         return 2
 

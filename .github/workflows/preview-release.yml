@@ -1,0 +1,100 @@
+---
+name: Preview Release
+
+on:
+  # zizmor: ignore[dangerous-triggers] This workflow intentionally runs after CI
+  # succeeds on master, checks out the exact tested commit, and creates only a
+  # prerelease using repository-scoped contents permissions.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [master]
+
+concurrency:
+  group: preview-release-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  preview-release:
+    name: Preview Release
+    runs-on: macos-latest
+    if: >-
+      ${{
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'master'
+      }}
+    steps:
+      - if: ${{ !env.ACT }}
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Install tools
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          cache: false
+          cache_save: false
+      - name: Compute preview metadata
+        id: metadata
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          label="$(mise exec -- uv run python -m scripts.tooling.versioning preview-label --sha "$HEAD_SHA")"
+          {
+            printf 'version=%s\n' "$version"
+            printf 'label=%s\n' "$label"
+            printf 'short_sha=%s\n' "${HEAD_SHA:0:12}"
+          } >>"$GITHUB_OUTPUT"
+      - name: Package preview artifact
+        env:
+          ARTIFACT_LABEL: ${{ steps.metadata.outputs.label }}
+          SHORTY_ALLOW_AD_HOC_RELEASE: "1"
+          SHORTY_BUILD_NUMBER: ${{ github.run_number }}
+          SHORTY_CODESIGN_IDENTITY: "-"
+          SHORTY_MARKETING_VERSION: ${{ steps.metadata.outputs.version }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          mise exec -- just app-package \
+            VERSION="$VERSION" \
+            ARTIFACT_LABEL="$ARTIFACT_LABEL"
+      - name: Publish preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+          LABEL: ${{ steps.metadata.outputs.label }}
+          SHORT_SHA: ${{ steps.metadata.outputs.short_sha }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          archive=".build/releases/shorty-$LABEL-macos.zip"
+          checksum="$archive.sha256"
+          notes="$RUNNER_TEMP/preview-release-notes.md"
+
+          cat >"$notes" <<EOF
+          Preview build for commit $HEAD_SHA.
+
+          Bundle version: $VERSION
+          Build number: $BUILD_NUMBER
+          Artifact label: $LABEL
+
+          This is a prerelease preview artifact. Public releases use SemVer tags like v$VERSION.
+          EOF
+
+          gh release delete "$LABEL" --repo "$REPO" --cleanup-tag --yes || true
+          gh release create "$LABEL" \
+            "$archive" \
+            "$checksum" \
+            --repo "$REPO" \
+            --target "$HEAD_SHA" \
+            --title "Preview $SHORT_SHA" \
+            --notes-file "$notes" \
+            --prerelease \
+            --latest=false

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import os
 import plistlib
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +20,7 @@ from scripts.tooling.package_app import (
     AppPackageError,
     validate_package_version,
 )
+from scripts.tooling.versioning import VersionError, read_app_version
 
 PROJECT_FILE = REPO_ROOT / "app" / "Shorty" / "Project.swift"
 
@@ -37,13 +37,13 @@ class ReleasePreflightResult:
 
 
 def project_marketing_version(project_file: Path = PROJECT_FILE) -> str:
-    text = project_file.read_text(encoding="utf-8")
-    match = re.search(r'let\s+marketingVersion\s*=\s*"([^"]+)"', text)
-    if not match:
+    version_file = project_file.parents[2] / "VERSION"
+    try:
+        return read_app_version(version_file)
+    except VersionError as error:
         raise ReleasePreflightError(
-            f"Could not find marketingVersion in {project_file}"
-        )
-    return match.group(1)
+            f"Could not read SemVer from root VERSION file: {error}"
+        ) from error
 
 
 def app_bundle_version(app_path: Path) -> str:
@@ -141,8 +141,8 @@ def run_preflight(
     project_version = project_marketing_version()
     if project_version != normalized_version:
         raise ReleasePreflightError(
-            f"Requested version {normalized_version} does not match Project.swift "
-            f"marketingVersion {project_version}."
+            f"Requested version {normalized_version} does not match root VERSION "
+            f"{project_version}."
         )
 
     app_version = app_bundle_version(app_path)

@@ -49,6 +49,21 @@ provided or ad-hoc signing for local validation, and writes
 `shorty-1.0.0-macos.zip` plus `shorty-1.0.0-macos.zip.sha256` under
 `.build/releases/`.
 
+Preview packaging keeps the bundled app version at SemVer `1.0.0` and changes
+only the artifact label:
+
+```sh
+SHORTY_BUILD_NUMBER=123 just app-package VERSION=1.0.0 ARTIFACT_LABEL=preview-test
+```
+
+The sandboxed App Store target is TestFlight-compatible when the SemVer version
+and numeric build number are supplied explicitly:
+
+```sh
+just app-store-build VERSION=1.0.0 BUILD_NUMBER=123
+just app-store-validate VERSION=1.0.0 BUILD_NUMBER=123
+```
+
 Optional notarization uses explicit environment variables only:
 
 ```sh

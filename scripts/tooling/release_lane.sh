@@ -2,6 +2,7 @@
 set -euo pipefail
 
 version=""
+build_number="${SHORTY_BUILD_NUMBER:-1}"
 lane="developer-id-with-safari"
 
 while [ $# -gt 0 ]; do
@@ -12,6 +13,10 @@ while [ $# -gt 0 ]; do
     ;;
   --lane)
     lane="$2"
+    shift 2
+    ;;
+  --build-number)
+    build_number="$2"
     shift 2
     ;;
   *)
@@ -55,8 +60,8 @@ developer-id-with-safari)
     --require-staple
   ;;
 app-store-candidate)
-  just app-store-build
-  just app-store-validate
+  just app-store-build VERSION="$version" BUILD_NUMBER="$build_number"
+  just app-store-validate VERSION="$version" BUILD_NUMBER="$build_number"
   ;;
 *)
   printf 'Unknown release lane: %s\n' "$lane" >&2

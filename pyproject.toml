@@ -1,6 +1,6 @@
 [project]
 name = "shorty"
-version = "0.1.0"
+version = "1.0.0"
 description = "Build, validation, and web tooling for the Shorty app"
 readme = "README.md"
 license = { file = "LICENSE" }

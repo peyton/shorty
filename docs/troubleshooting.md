@@ -78,7 +78,9 @@ reporting is reserved for advanced diagnostics and is off in release defaults.
 ## Release Archive Checks
 
 Release archives are written as `shorty-<version>-macos.zip` with a matching
-`.sha256` file.
+`.sha256` file. Preview archives use a non-SemVer label, for example
+`shorty-preview-abcdef012345-macos.zip`, while the app bundle still reports the
+SemVer value from the root `VERSION` file.
 
 Verify a downloaded archive with:
 
@@ -87,3 +89,8 @@ shasum -a 256 shorty-<version>-macos.zip
 ```
 
 The output should match the checksum line published with the release asset.
+
+For TestFlight builds, never use a preview label as the app version. The
+sandboxed App Store candidate must keep `CFBundleShortVersionString` at the root
+SemVer version and use a positive numeric `CFBundleVersion` build number for
+each App Store Connect upload.

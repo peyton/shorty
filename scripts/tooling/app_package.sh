@@ -6,12 +6,17 @@ source "$(cd -- "$(dirname -- "$0")" && pwd)/common.sh"
 
 setup_local_tooling_env
 
+artifact_label=""
 version=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
   --version)
     version="$2"
+    shift 2
+    ;;
+  --artifact-label)
+    artifact_label="$2"
     shift 2
     ;;
   *)
@@ -22,7 +27,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$version" ]; then
-  printf 'Usage: just app-package VERSION=<version>\n' >&2
+  printf 'Usage: just app-package VERSION=<version> [ARTIFACT_LABEL=<label>]\n' >&2
   exit 2
 fi
 
@@ -45,7 +50,13 @@ fi
 
 codesign --verify --deep --strict --verbose=2 "$app_path"
 
-uv run python -m scripts.tooling.package_app \
-  --version "$version" \
-  --app-path "$app_path" \
+package_args=(
+  --version "$version"
+  --app-path "$app_path"
   --output-dir "$REPO_ROOT/.build/releases"
+)
+if [ -n "$artifact_label" ]; then
+  package_args+=(--artifact-label "$artifact_label")
+fi
+
+uv run python -m scripts.tooling.package_app "${package_args[@]}"

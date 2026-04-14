@@ -5,11 +5,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import plistlib
-import re
 import stat
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from scripts.tooling.versioning import (
+    VersionError,
+    validate_app_version,
+    validate_artifact_label,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_APP_PATH = (
@@ -22,7 +27,6 @@ DEFAULT_APP_PATH = (
     / "Shorty.app"
 )
 DEFAULT_OUTPUT_DIR = REPO_ROOT / ".build" / "releases"
-PACKAGE_VERSION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 
@@ -38,13 +42,19 @@ class AppPackageResult:
 
 
 def validate_package_version(version: str) -> str:
-    normalized = version.strip()
-    if not PACKAGE_VERSION_PATTERN.fullmatch(normalized):
+    try:
+        return validate_app_version(version)
+    except VersionError as error:
         raise AppPackageError(
-            "Package version must contain only letters, numbers, dots, "
-            f"underscores, or hyphens; received {version!r}."
-        )
-    return normalized
+            f"Package version must be strict MAJOR.MINOR.PATCH SemVer; {error}"
+        ) from error
+
+
+def validate_package_label(label: str, app_version: str) -> str:
+    try:
+        return validate_artifact_label(label, app_version)
+    except VersionError as error:
+        raise AppPackageError(str(error)) from error
 
 
 def app_bundle_version(app_path: Path) -> str:
@@ -105,8 +115,17 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def package_app(app_path: Path, version: str, output_dir: Path) -> AppPackageResult:
+def package_app(
+    app_path: Path,
+    version: str,
+    output_dir: Path,
+    artifact_label: str | None = None,
+) -> AppPackageResult:
     normalized_version = validate_package_version(version)
+    normalized_label = validate_package_label(
+        artifact_label or normalized_version,
+        normalized_version,
+    )
     resolved_app_path = app_path.resolve()
     bundle_version = app_bundle_version(resolved_app_path)
     if bundle_version != normalized_version:
@@ -116,7 +135,7 @@ def package_app(app_path: Path, version: str, output_dir: Path) -> AppPackageRes
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = output_dir / f"shorty-{normalized_version}-macos.zip"
+    archive_path = output_dir / f"shorty-{normalized_label}-macos.zip"
     checksum_path = output_dir / f"{archive_path.name}.sha256"
 
     paths = iter_bundle_paths(resolved_app_path)
@@ -142,6 +161,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Package the Shorty macOS app.")
     parser.add_argument("--version", required=True, help="Release version label.")
     parser.add_argument(
+        "--artifact-label",
+        help=(
+            "Archive label. Defaults to VERSION for public releases; previews "
+            "must use a non-SemVer preview-* label."
+        ),
+    )
+    parser.add_argument(
         "--app-path",
         default=str(DEFAULT_APP_PATH),
         help="Built Shorty.app path.",
@@ -158,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
             app_path=Path(args.app_path),
             version=args.version,
             output_dir=Path(args.output_dir),
+            artifact_label=args.artifact_label,
         )
     except AppPackageError as error:
         print(f"ERROR: {error}")

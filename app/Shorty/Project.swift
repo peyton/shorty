@@ -1,9 +1,38 @@
+import Foundation
 import ProjectDescription
 
 let defaultDeploymentTarget: DeploymentTargets = .macOS("13.0")
 let signingTeam = Environment.teamId.getString(default: "3VDQ4656LX")
-let marketingVersion = "1.0.0"
-let buildNumber = "1"
+
+func nonEmptyTrimmed(_ value: String?) -> String? {
+    guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !trimmed.isEmpty
+    else {
+        return nil
+    }
+    return trimmed
+}
+
+func repoVersion() -> String {
+    let projectFile = URL(fileURLWithPath: #filePath)
+    let versionFile = projectFile
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("VERSION")
+
+    if let contents = try? String(contentsOf: versionFile, encoding: .utf8),
+       let version = nonEmptyTrimmed(contents) {
+        return version
+    }
+
+    fatalError("Could not read root VERSION file at \(versionFile.path)")
+}
+
+let marketingVersion = nonEmptyTrimmed(
+    Environment.shortyMarketingVersion.getString(default: "")
+) ?? repoVersion()
+let buildNumber = nonEmptyTrimmed(Environment.shortyBuildNumber.getString(default: "")) ?? "1"
 
 func targetSettings(includeAppAssets: Bool = false) -> Settings {
     var base = SettingsDictionary()
