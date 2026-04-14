@@ -3,6 +3,7 @@
   "name": "Shorty – Web App Bridge",
   "version": "1.0.0",
   "description": "Reports the current web app domain to Shorty for context-aware keyboard shortcuts.",
+  "homepage_url": "https://github.com/peyton/shorty",
   "permissions": ["activeTab", "nativeMessaging", "tabs"],
   "background": {
     "service_worker": "background.js"

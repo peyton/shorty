@@ -19,6 +19,7 @@ def test_browser_extension_declares_required_permissions() -> None:
     manifest = json.loads((EXTENSION_ROOT / "manifest.json").read_text())
 
     assert manifest["manifest_version"] == 3
+    assert manifest["homepage_url"] == "https://github.com/peyton/shorty"
     assert set(manifest["permissions"]) >= {"nativeMessaging", "tabs"}
     assert manifest["background"]["service_worker"] == "background.js"
     assert manifest["content_scripts"][0]["matches"] == ["<all_urls>"]

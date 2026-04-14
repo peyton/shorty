@@ -40,6 +40,15 @@ def test_committed_static_site_is_review_ready() -> None:
     assert errors == []
 
 
+def test_license_page_documents_agpl_and_source_archive() -> None:
+    license_page = REPO_ROOT / "web" / "license" / "index.html"
+    text = license_page.read_text(encoding="utf-8")
+
+    assert "AGPL-3.0-or-later" in text
+    assert "shorty-&lt;version&gt;-source.tar.gz" in text
+    assert "shorty@peyton.app" in text
+
+
 def test_brand_svg_assets_are_committed_with_metadata() -> None:
     asset_root = REPO_ROOT / "web" / "assets"
 
@@ -86,6 +95,7 @@ def test_static_site_validator_rejects_placeholder_and_missing_contact(
     site_root.mkdir()
     (site_root / "support").mkdir()
     (site_root / "privacy").mkdir()
+    (site_root / "license").mkdir()
     (site_root / "assets").mkdir()
     (site_root / "assets" / "site.css").write_text("body { color: #111; }\n")
     (site_root / "robots.txt").write_text(
@@ -97,6 +107,7 @@ def test_static_site_validator_rejects_placeholder_and_missing_contact(
           <url><loc>https://shorty.peyton.app/</loc></url>
           <url><loc>https://shorty.peyton.app/support/</loc></url>
           <url><loc>https://shorty.peyton.app/privacy/</loc></url>
+          <url><loc>https://shorty.peyton.app/license/</loc></url>
         </urlset>
         """,
         encoding="utf-8",
@@ -118,6 +129,7 @@ def test_static_site_validator_rejects_placeholder_and_missing_contact(
         "index.html",
         "support/index.html",
         "privacy/index.html",
+        "license/index.html",
         "404.html",
     ):
         (site_root / relative_path).write_text(broken_page, encoding="utf-8")

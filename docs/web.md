@@ -24,10 +24,15 @@ archive. Keep the download language aligned with the app release tooling:
 
 - app archive: `shorty-<version>-macos.zip`
 - checksum: `shorty-<version>-macos.zip.sha256`
+- source archive: `shorty-<version>-source.tar.gz`
+- source checksum: `shorty-<version>-source.tar.gz.sha256`
 - verification command: `shasum -a 256 shorty-<version>-macos.zip`
 
 Support copy should keep the browser bridge clearly optional. Native app
 shortcut remapping is the primary release path.
+
+The license page at `/license/` must stay aligned with `LICENSE`, `NOTICE`,
+`THIRD_PARTY_NOTICES.md`, and Settings > About.
 
 ## Marketing Screenshots
 

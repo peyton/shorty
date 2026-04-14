@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import plistlib
+import subprocess
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -17,6 +19,11 @@ from scripts.tooling.browser_manifest import (
     uninstall_manifests,
     validate_extension_id,
 )
+from scripts.tooling.legal_resources import (
+    LegalResourceError,
+    validate_bundled_legal_resources,
+    validate_root_legal_resources,
+)
 from scripts.tooling.package_app import (
     AppPackageError,
     package_app,
@@ -29,6 +36,7 @@ from scripts.tooling.release_preflight import (
 )
 from scripts.tooling.release_verify import verify_release
 from scripts.tooling.safari_extension_verify import verify_safari_extension
+from scripts.tooling.source_package import package_source
 
 
 def make_fake_app(root: Path, version: str = "1.0.0") -> Path:
@@ -83,6 +91,24 @@ def add_fake_safari_extension(
         encoding="utf-8",
     )
     return extension
+
+
+def add_fake_legal_resources(app: Path) -> Path:
+    legal = app / "Contents" / "Resources" / "Legal"
+    legal.mkdir(parents=True)
+    (legal / "LICENSE.txt").write_text(
+        "GNU AFFERO GENERAL PUBLIC LICENSE\nVersion 3\n",
+        encoding="utf-8",
+    )
+    (legal / "NOTICE.txt").write_text(
+        ("AGPL-3.0-or-later\nhttps://github.com/peyton/shorty\nWITHOUT ANY WARRANTY\n"),
+        encoding="utf-8",
+    )
+    (legal / "THIRD_PARTY_NOTICES.md").write_text(
+        "Shorty has no third-party runtime libraries.\n",
+        encoding="utf-8",
+    )
+    return legal
 
 
 def test_app_package_creates_deterministic_zip_and_checksum(tmp_path: Path) -> None:
@@ -233,18 +259,109 @@ def test_safari_extension_verify_requires_bundled_extension(tmp_path: Path) -> N
 
 
 def test_release_verify_checks_archive_checksum_and_extension(tmp_path: Path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "LICENSE").write_text(
+        "GNU AFFERO GENERAL PUBLIC LICENSE\nVersion 3\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "NOTICE").write_text(
+        ("AGPL-3.0-or-later\nhttps://github.com/peyton/shorty\nWITHOUT ANY WARRANTY\n"),
+        encoding="utf-8",
+    )
+    (tmp_path / "THIRD_PARTY_NOTICES.md").write_text(
+        "Shorty has no third-party runtime libraries.\n",
+        encoding="utf-8",
+    )
     app = make_fake_app(tmp_path)
+    add_fake_legal_resources(app)
     add_fake_safari_extension(app)
+    source = package_source("1.0.0", tmp_path / "releases", repo_root=tmp_path)
     packaged = package_app(app, "1.0.0", tmp_path / "releases")
 
     result = verify_release(
         version="1.0.0",
         archive_path=packaged.archive_path,
         checksum_path=packaged.checksum_path,
+        source_archive_path=source.archive_path,
+        source_checksum_path=source.checksum_path,
     )
 
     assert result.version == "1.0.0"
     assert result.digest == packaged.digest
+    assert result.source_digest == source.digest
+
+
+def test_legal_resource_validators_require_root_and_bundled_notices(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(LegalResourceError, match="Missing legal resource"):
+        validate_root_legal_resources(tmp_path)
+
+    for filename in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"):
+        (tmp_path / filename).write_text("incomplete\n", encoding="utf-8")
+
+    with pytest.raises(LegalResourceError, match="required text"):
+        validate_root_legal_resources(tmp_path)
+
+    (tmp_path / "LICENSE").write_text(
+        "GNU AFFERO GENERAL PUBLIC LICENSE\nVersion 3\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "NOTICE").write_text(
+        ("AGPL-3.0-or-later\nhttps://github.com/peyton/shorty\nWITHOUT ANY WARRANTY\n"),
+        encoding="utf-8",
+    )
+    (tmp_path / "THIRD_PARTY_NOTICES.md").write_text(
+        "Shorty has no third-party runtime libraries.\n",
+        encoding="utf-8",
+    )
+
+    assert validate_root_legal_resources(tmp_path).files == (
+        "LICENSE",
+        "NOTICE",
+        "THIRD_PARTY_NOTICES.md",
+    )
+
+    app = make_fake_app(tmp_path / "bundle")
+    add_fake_legal_resources(app)
+
+    assert validate_bundled_legal_resources(app).files == (
+        "LICENSE.txt",
+        "NOTICE.txt",
+        "THIRD_PARTY_NOTICES.md",
+    )
+
+
+def test_source_package_creates_deterministic_archive_and_checksum(
+    tmp_path: Path,
+) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "README.md").write_text("# Shorty\n", encoding="utf-8")
+    (tmp_path / "NOTICE").write_text("notice\n", encoding="utf-8")
+    ignored = tmp_path / ".build" / "ignored.txt"
+    ignored.parent.mkdir()
+    ignored.write_text("ignore me\n", encoding="utf-8")
+    output_dir = tmp_path / ".build" / "releases"
+
+    first = package_source("1.0.0", output_dir=output_dir, repo_root=tmp_path)
+    second = package_source("1.0.0", output_dir=output_dir, repo_root=tmp_path)
+
+    assert first.archive_path == output_dir / "shorty-1.0.0-source.tar.gz"
+    assert first.checksum_path == output_dir / "shorty-1.0.0-source.tar.gz.sha256"
+    assert first.digest == second.digest
+    assert (
+        first.checksum_path.read_text(encoding="utf-8")
+        == f"{first.digest}  shorty-1.0.0-source.tar.gz\n"
+    )
+
+    with tarfile.open(first.archive_path, "r:gz") as archive:
+        names = archive.getnames()
+        assert "shorty-1.0.0/README.md" in names
+        assert "shorty-1.0.0/NOTICE" in names
+        assert "shorty-1.0.0/.build/ignored.txt" not in names
+        assert all(member.uid == 0 for member in archive.getmembers())
+        assert all(member.gid == 0 for member in archive.getmembers())
+        assert all(member.mtime == 0 for member in archive.getmembers())
 
 
 def test_appcast_generation_requires_signature_unless_allowed(tmp_path: Path) -> None:
@@ -270,6 +387,9 @@ def test_appcast_generation_requires_signature_unless_allowed(tmp_path: Path) ->
     )
 
     assert output.read_text(encoding="utf-8").startswith("<?xml")
+    assert "https://github.com/peyton/shorty/releases/tag/v1.0.0" in output.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_app_store_candidate_validation_checks_sandbox_and_extension(

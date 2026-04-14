@@ -40,6 +40,10 @@ app-package VERSION='local':
     version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/app_package.sh --version "$version"
 
 [group('release')]
+source-package VERSION='local':
+    version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/source_package.sh --version "$version"
+
+[group('release')]
 app-notarize VERSION='local':
     version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/app_notarize.sh --version "$version"
 

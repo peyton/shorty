@@ -30,6 +30,7 @@ case "$lane" in
 developer-id)
   just build
   just release-preflight VERSION="$version"
+  just source-package VERSION="$version"
   just app-package VERSION="$version"
   just app-notarize VERSION="$version"
   just dmg-package VERSION="$version"
@@ -42,6 +43,7 @@ developer-id)
 developer-id-with-safari)
   just build
   just release-preflight VERSION="$version"
+  just source-package VERSION="$version"
   just app-package VERSION="$version"
   just app-notarize VERSION="$version"
   just safari-extension-verify
