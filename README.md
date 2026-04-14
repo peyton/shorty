@@ -89,6 +89,7 @@ App:
 - `just build` - build the app.
 - `just run` - build and launch the app.
 - `just test-app` - run Swift tests.
+- `just integration` - build a small macOS fixture app and exercise launch/menu automation.
 - `just install-browser-bridge EXTENSION_ID=<id> BROWSERS=chrome` - build and install browser native messaging manifests.
 - `just uninstall-browser-bridge BROWSERS=chrome` - remove browser native messaging manifests.
 
@@ -110,7 +111,7 @@ Web:
 Repository:
 
 - `just test-python` - run Python tests.
-- `just test` - run app and Python tests.
+- `just test` - run app, Python, and macOS integration tests.
 - `just lint` - run web checks and repository lint.
 - `just fmt` - format supported repo files.
 - `just ci` - run the full local CI workflow.

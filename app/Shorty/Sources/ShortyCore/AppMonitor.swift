@@ -38,9 +38,11 @@ public final class AppMonitor: ObservableObject {
     public init() {
         // Seed with current frontmost app
         if let app = NSWorkspace.shared.frontmostApplication {
-            currentBundleID = app.bundleIdentifier
-            currentAppName = app.localizedName
-            currentPID = app.processIdentifier
+            updateActiveApplication(
+                bundleIdentifier: app.bundleIdentifier,
+                localizedName: app.localizedName,
+                processIdentifier: app.processIdentifier
+            )
         }
 
         // Observe future changes
@@ -51,14 +53,27 @@ public final class AppMonitor: ObservableObject {
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] app in
-                self?.currentBundleID = app.bundleIdentifier
-                self?.currentAppName = app.localizedName
-                self?.currentPID = app.processIdentifier
-                // Clear web app domain when switching away from a browser
-                if let self = self, !self.isBrowser(app.bundleIdentifier) {
-                    self.webAppDomain = nil
-                }
+                self?.updateActiveApplication(
+                    bundleIdentifier: app.bundleIdentifier,
+                    localizedName: app.localizedName,
+                    processIdentifier: app.processIdentifier
+                )
             }
+    }
+
+    public func updateActiveApplication(
+        bundleIdentifier: String?,
+        localizedName: String?,
+        processIdentifier: pid_t
+    ) {
+        let previousBundleID = currentBundleID
+        currentBundleID = bundleIdentifier
+        currentAppName = localizedName
+        currentPID = processIdentifier
+
+        if previousBundleID != bundleIdentifier || !isBrowser(bundleIdentifier) {
+            webAppDomain = nil
+        }
     }
 
     // MARK: - Browser detection
