@@ -68,7 +68,25 @@ Optional notarization uses explicit environment variables only:
 
 ```sh
 NOTARYTOOL_PROFILE=<profile> just app-notarize VERSION=1.0.0
+# or
+SHORTY_APP_STORE_CONNECT_KEY_PATH=/path/to/AuthKey_ABC123DEFG.p8 \
+SHORTY_APP_STORE_CONNECT_KEY_ID=ABC123DEFG \
+SHORTY_APP_STORE_CONNECT_ISSUER_ID=<issuer-uuid> \
+just app-notarize VERSION=1.0.0
 ```
+
+For preview-labeled archives, keep the archive label through notarization:
+
+```sh
+just app-notarize VERSION=1.0.0 ARTIFACT_LABEL=preview-abcdef012345
+```
+
+GitHub preview releases need Developer ID signing assets and a Team App Store
+Connect API key in the `preview-release` GitHub Environment secrets. GitHub can
+host the workflow, but it cannot issue a Developer ID certificate or notarize
+without Apple Developer Program credentials. The App Store Connect key must be a
+Team key, not an Individual key, because `notarytool` uses issuer-based Team API
+key authentication for this workflow.
 
 Shorty is licensed as `AGPL-3.0-or-later`. Legal resources are bundled from
 `Shorty/Sources/Shorty/Resources/Legal/` and shown in Settings > About. The App

@@ -91,6 +91,22 @@ final class ReleaseModelsTests: XCTestCase {
         XCTAssertTrue(json.contains(#""sourceURL":"https:\/\/github.com\/peyton\/shorty\/releases\/tag\/v1.0.0""#))
     }
 
+    func testLaunchAtLoginStatusReportsUserFacingState() {
+        let enabled = LaunchAtLoginStatus(
+            state: .enabled,
+            detail: "Shorty will open automatically when you sign in."
+        )
+        let needsApproval = LaunchAtLoginStatus(
+            state: .requiresApproval,
+            detail: "Approve Shorty in System Settings."
+        )
+
+        XCTAssertTrue(enabled.isEnabled)
+        XCTAssertEqual(enabled.title, "Launch at Login enabled")
+        XCTAssertFalse(needsApproval.isEnabled)
+        XCTAssertEqual(needsApproval.title, "Launch at Login needs approval")
+    }
+
     func testShortcutEngineDiagnosticSnapshotIncludesBrowserSource() {
         let suiteName = "ShortyTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

@@ -308,6 +308,49 @@ public struct SafariExtensionStatus: Codable, Equatable {
     }
 }
 
+public struct LaunchAtLoginStatus: Codable, Equatable {
+    public enum State: String, Codable {
+        case enabled
+        case notRegistered
+        case requiresApproval
+        case notFound
+        case needsAttention
+        case unknown
+    }
+
+    public let state: State
+    public let detail: String
+
+    public init(
+        state: State = .unknown,
+        detail: String = "Launch at Login has not been checked."
+    ) {
+        self.state = state
+        self.detail = detail
+    }
+
+    public var isEnabled: Bool {
+        state == .enabled
+    }
+
+    public var title: String {
+        switch state {
+        case .enabled:
+            return "Launch at Login enabled"
+        case .notRegistered:
+            return "Launch at Login off"
+        case .requiresApproval:
+            return "Launch at Login needs approval"
+        case .notFound:
+            return "Launch at Login unavailable"
+        case .needsAttention:
+            return "Launch at Login needs attention"
+        case .unknown:
+            return "Launch at Login not checked"
+        }
+    }
+}
+
 public struct RuntimeDiagnosticSnapshot: Codable, Equatable {
     public let createdAt: Date
     public let engineStatus: String

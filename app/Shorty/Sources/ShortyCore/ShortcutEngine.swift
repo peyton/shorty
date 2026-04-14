@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import ServiceManagement
 
 /// Top-level orchestrator for monitoring the active app, resolving adapters,
 /// installing the keyboard event tap, and running the optional browser bridge.
@@ -25,6 +26,7 @@ public final class ShortcutEngine: ObservableObject {
     @Published public private(set) var shortcutProfile: UserShortcutProfile
     @Published public private(set) var updateStatus: UpdateStatus
     @Published public private(set) var safariExtensionStatus = SafariExtensionStatus()
+    @Published public private(set) var launchAtLoginStatus: LaunchAtLoginStatus
     @Published public private(set) var isFirstRunComplete: Bool
     @Published public private(set) var generatedAdapterPreview: Adapter?
     @Published public private(set) var adapterGenerationMessage: String?
@@ -64,6 +66,7 @@ public final class ShortcutEngine: ObservableObject {
                 forKey: Self.updateChecksEnabledDefaultsKey
             )
         )
+        self.launchAtLoginStatus = Self.currentLaunchAtLoginStatus()
         self.appMonitor = AppMonitor()
         self.registry = AdapterRegistry()
         self.eventTap = EventTapManager(
@@ -225,6 +228,28 @@ public final class ShortcutEngine: ObservableObject {
                 ? "Shorty will use the direct-download update feed when Sparkle is bundled."
                 : "Automatic direct-download update checks are off."
         )
+    }
+
+    public func refreshLaunchAtLoginStatus() {
+        launchAtLoginStatus = Self.currentLaunchAtLoginStatus()
+    }
+
+    public func setLaunchAtLoginEnabled(_ isEnabled: Bool) {
+        do {
+            if isEnabled {
+                if SMAppService.mainApp.status != .enabled {
+                    try SMAppService.mainApp.register()
+                }
+            } else if SMAppService.mainApp.status != .notRegistered {
+                try SMAppService.mainApp.unregister()
+            }
+            refreshLaunchAtLoginStatus()
+        } catch {
+            launchAtLoginStatus = LaunchAtLoginStatus(
+                state: .needsAttention,
+                detail: "Could not update Launch at Login: \(error.localizedDescription)"
+            )
+        }
     }
 
     public func recordUpdateCheckResult(
@@ -458,6 +483,36 @@ public final class ShortcutEngine: ObservableObject {
             return UpdateStatus.defaultSourceURL
         }
         return URL(string: "https://github.com/peyton/shorty/releases/tag/v\(version)")
+    }
+
+    private static func currentLaunchAtLoginStatus() -> LaunchAtLoginStatus {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            return LaunchAtLoginStatus(
+                state: .enabled,
+                detail: "Shorty will open automatically when you sign in."
+            )
+        case .notRegistered:
+            return LaunchAtLoginStatus(
+                state: .notRegistered,
+                detail: "Shorty will only open when you launch it yourself."
+            )
+        case .requiresApproval:
+            return LaunchAtLoginStatus(
+                state: .requiresApproval,
+                detail: "Approve Shorty in System Settings > General > Login Items."
+            )
+        case .notFound:
+            return LaunchAtLoginStatus(
+                state: .notFound,
+                detail: "macOS cannot register this copy. Move Shorty to Applications and try again."
+            )
+        @unknown default:
+            return LaunchAtLoginStatus(
+                state: .unknown,
+                detail: "macOS returned an unknown Launch at Login state."
+            )
+        }
     }
 
     public static func requestAccessibilityPermission() {

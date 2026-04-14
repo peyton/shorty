@@ -13,6 +13,8 @@ from scripts.tooling.package_app import DEFAULT_APP_PATH
 
 DEFAULT_EXTENSION_BUNDLE_ID = "app.peyton.shorty.SafariWebExtension"
 DEFAULT_EXTENSION_BUNDLE_NAME = "ShortySafariWebExtension.appex"
+DEFAULT_APP_GROUP = "group.app.peyton.shorty"
+APP_GROUP_ENTITLEMENT = "com.apple.security.application-groups"
 SAFARI_EXTENSION_POINT = "com.apple.Safari.web-extension"
 
 
@@ -52,6 +54,35 @@ def require_codesign_verified(path: Path) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def codesign_entitlements(path: Path) -> dict[str, object]:
+    result = subprocess.run(
+        ["codesign", "-d", "--entitlements", ":-", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    data = result.stdout.strip()
+    if not data:
+        raise SafariExtensionVerificationError(
+            f"Signed bundle is missing entitlements: {path}"
+        )
+    entitlements = plistlib.loads(data)
+    if not isinstance(entitlements, dict):
+        raise SafariExtensionVerificationError(f"Invalid entitlements for {path}")
+    return entitlements
+
+
+def require_app_group_entitlement(
+    path: Path,
+    app_group: str = DEFAULT_APP_GROUP,
+) -> None:
+    entitlements = codesign_entitlements(path)
+    groups = entitlements.get(APP_GROUP_ENTITLEMENT)
+    if not isinstance(groups, list) or app_group not in groups:
+        raise SafariExtensionVerificationError(
+            f"{path} must include {APP_GROUP_ENTITLEMENT}={app_group}"
+        )
 
 
 def verify_safari_extension(
@@ -112,6 +143,8 @@ def verify_safari_extension(
     if require_codesign:
         require_codesign_verified(resolved_app_path)
         require_codesign_verified(extension_path)
+        require_app_group_entitlement(resolved_app_path)
+        require_app_group_entitlement(extension_path)
 
     return SafariExtensionVerificationResult(
         app_path=resolved_app_path,

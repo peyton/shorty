@@ -38,7 +38,10 @@ from scripts.tooling.release_preflight import (
     check_xcode_is_stable,
 )
 from scripts.tooling.release_verify import verify_release
-from scripts.tooling.safari_extension_verify import verify_safari_extension
+from scripts.tooling.safari_extension_verify import (
+    SafariExtensionVerificationError,
+    verify_safari_extension,
+)
 from scripts.tooling.source_package import package_source
 from scripts.tooling.versioning import (
     VersionError,
@@ -309,6 +312,66 @@ def test_safari_extension_verify_requires_bundled_extension(tmp_path: Path) -> N
     assert result.extension_path == extension
     assert result.bundle_identifier == "app.peyton.shorty.SafariWebExtension"
     assert result.manifest_version == 3
+
+
+def test_safari_extension_verify_requires_app_group_entitlements(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = make_fake_app(tmp_path)
+    add_fake_safari_extension(app)
+
+    def fake_run(
+        args: list[str],
+        check: bool,
+        capture_output: bool,
+        text: bool = False,
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+        if "--entitlements" in args:
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=plistlib.dumps({}),
+                stderr=b"",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(SafariExtensionVerificationError, match="application-groups"):
+        verify_safari_extension(app, require_codesign=True)
+
+
+def test_safari_extension_verify_accepts_app_group_entitlements(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = make_fake_app(tmp_path)
+    add_fake_safari_extension(app)
+    entitlement_data = plistlib.dumps(
+        {"com.apple.security.application-groups": ["group.app.peyton.shorty"]}
+    )
+
+    def fake_run(
+        args: list[str],
+        check: bool,
+        capture_output: bool,
+        text: bool = False,
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+        if "--entitlements" in args:
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=entitlement_data,
+                stderr=b"",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = verify_safari_extension(app, require_codesign=True)
+
+    assert result.bundle_identifier == "app.peyton.shorty.SafariWebExtension"
 
 
 def test_release_verify_checks_archive_checksum_and_extension(tmp_path: Path) -> None:
