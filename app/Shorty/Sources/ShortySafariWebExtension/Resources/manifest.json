@@ -3,6 +3,7 @@
   "name": "Shorty Safari Web App Bridge",
   "version": "1.0.0",
   "description": "Reports the current Safari web app domain to Shorty for context-aware keyboard shortcuts.",
+  "homepage_url": "https://github.com/peyton/shorty",
   "permissions": ["activeTab", "nativeMessaging", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": {

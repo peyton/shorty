@@ -39,13 +39,23 @@ Shorty installs a keyboard event tap and reads app menus, so macOS must grant Ac
 From the repo root:
 
 ```sh
+just source-package VERSION=1.0.0
 just app-package VERSION=1.0.0
 ```
 
-The command builds the Release app, signs it with `SHORTY_CODESIGN_IDENTITY` when provided or ad-hoc signing for local validation, and writes `shorty-1.0.0-macos.zip` plus `shorty-1.0.0-macos.zip.sha256` under `.build/releases/`.
+The source command writes `shorty-1.0.0-source.tar.gz` plus a checksum. The app
+command builds the Release app, signs it with `SHORTY_CODESIGN_IDENTITY` when
+provided or ad-hoc signing for local validation, and writes
+`shorty-1.0.0-macos.zip` plus `shorty-1.0.0-macos.zip.sha256` under
+`.build/releases/`.
 
 Optional notarization uses explicit environment variables only:
 
 ```sh
 NOTARYTOOL_PROFILE=<profile> just app-notarize VERSION=1.0.0
 ```
+
+Shorty is licensed as `AGPL-3.0-or-later`. Legal resources are bundled from
+`Shorty/Sources/Shorty/Resources/Legal/` and shown in Settings > About. The App
+Store candidate target is secondary and requires legal review before public
+distribution.

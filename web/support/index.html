@@ -21,6 +21,7 @@
       <nav class="nav" aria-label="Main navigation">
         <a href="/">Home</a>
         <a href="/privacy/">Privacy</a>
+        <a href="/license/">License</a>
         <a href="https://github.com/peyton/shorty">Source</a>
       </nav>
     </header>
@@ -43,7 +44,8 @@
           Download Shorty from
           <a href="https://github.com/peyton/shorty/releases/latest"
             >the latest release</a
-          >. Each app archive is paired with a <code>.sha256</code> file.
+          >. Each app archive and source archive is paired with a
+          <code>.sha256</code> file.
         </p>
         <div class="command-block">
           <code>shasum -a 256<br />shorty-&lt;version&gt;-macos.zip</code>
@@ -195,13 +197,18 @@
         <p>
           The project source is available at
           <a href="https://github.com/peyton/shorty">github.com/peyton/shorty</a
-          >. Build and validation commands are documented in the repository.
+          >. Public direct-download releases include a
+          <code>shorty-&lt;version&gt;-source.tar.gz</code> archive for the
+          matching version.
         </p>
       </section>
     </main>
 
     <footer class="footer">
-      <p>Contact <a href="mailto:shorty@peyton.app">shorty@peyton.app</a>.</p>
+      <p>
+        <a href="/license/">AGPL-3.0-or-later</a>. Contact
+        <a href="mailto:shorty@peyton.app">shorty@peyton.app</a>.
+      </p>
     </footer>
   </body>
 </html>

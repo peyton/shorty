@@ -17,6 +17,7 @@ Useful docs:
 - [Keyboard unifier strategies](docs/keyboard-unifier-strategies.md)
 - [Strategy 5 local features ExecPlan](docs/strategy5-local-features-execplan.md)
 - [Release hardening ExecPlan](docs/release-hardening-execplan.md)
+- [Open source distribution](docs/open-source.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [App workspace notes](app/README.md)
 
@@ -115,6 +116,7 @@ App:
 Release:
 
 - `just release-preflight VERSION=1.0.0` - verify a clean public release state.
+- `just source-package VERSION=1.0.0` - create the matching source archive and checksum for AGPL distribution.
 - `just app-package VERSION=1.0.0` - build, sign, zip, and checksum the app under `.build/releases/`.
 - `just app-notarize VERSION=1.0.0` - submit the app archive to Apple notarization, staple the app, and repackage it.
 - `just dmg-package VERSION=1.0.0` - create a DMG with `Shorty.app` and an Applications shortcut.
@@ -154,6 +156,26 @@ Repository:
 `IntentMatcher` is intentionally conservative for auto adapters. It accepts exact aliases, exact key combos, or scores at least `0.70`, and rejects close competing matches with a margin below `0.20`.
 
 `EventTapManager` intercepts canonical keyDown events and either remaps the event, invokes a menu item through Accessibility, performs an AX action, or passes the event through unchanged.
+
+## License and Source
+
+Shorty is free software licensed under the GNU Affero General Public License,
+version 3 or later. The SPDX license identifier is `AGPL-3.0-or-later`.
+
+Public direct-download releases should include a signed or notarized macOS app
+archive, a checksum, a matching source archive, and a source checksum:
+
+- `shorty-<version>-macos.zip`
+- `shorty-<version>-macos.zip.sha256`
+- `shorty-<version>-source.tar.gz`
+- `shorty-<version>-source.tar.gz.sha256`
+
+Runtime attribution is documented in `THIRD_PARTY_NOTICES.md` and shown in
+Settings > About. The current app does not bundle third-party runtime
+libraries; development-only tools are not redistributed inside `Shorty.app`.
+
+The App Store target remains a legal-review-gated candidate. Direct download is
+the primary public AGPL release path.
 
 ## Release Notes
 

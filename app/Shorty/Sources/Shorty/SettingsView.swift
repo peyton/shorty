@@ -255,7 +255,8 @@ struct SettingsContentView: View {
                 adapterCount: snapshot.adapters.count,
                 shortcutCount: snapshot.shortcuts.count,
                 accessibilityStatus: snapshot.accessibilityStatus,
-                browserBridgeStatus: snapshot.browserBridgeStatus
+                browserBridgeStatus: snapshot.browserBridgeStatus,
+                updateStatus: snapshot.updateStatus
             )
             .tabItem {
                 Label("About", systemImage: "info.circle")
@@ -462,7 +463,11 @@ private struct SettingsUpdatesTab: View {
                         .onChange(of: automaticChecksEnabled) { nextValue in
                             actions.setAutomaticUpdates(nextValue)
                         }
+                    SettingsInfoRow("Current version", updateStatus.currentVersion)
                     SettingsInfoRow("Last checked", formatted(updateStatus.lastCheckedAt))
+                    if let sourceURL = updateStatus.sourceURL {
+                        Link("Source and release notes", destination: sourceURL)
+                    }
                     Button("Check for Updates", action: actions.checkForUpdates)
                 }
             }
@@ -694,32 +699,109 @@ private struct SettingsAboutTab: View {
     let shortcutCount: Int
     let accessibilityStatus: String
     let browserBridgeStatus: String
+    let updateStatus: UpdateStatus
 
     var body: some View {
-        VStack(spacing: 16) {
-            ShortyMarkView(size: 64)
+        ScrollView {
+            VStack(spacing: 16) {
+                ShortyMarkView(size: 64)
 
-            Text("Shorty")
-                .font(.title)
-                .fontWeight(.bold)
+                Text("Shorty")
+                    .font(.title)
+                    .fontWeight(.bold)
 
-            Text("A local command map for macOS shortcuts.")
-                .foregroundColor(.secondary)
+                Text("A local command map for macOS shortcuts.")
+                    .foregroundColor(.secondary)
 
-            Divider()
+                Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                SettingsInfoRow("Version", versionBuild)
-                SettingsInfoRow("Engine", engineStatus)
-                SettingsInfoRow("Adapters loaded", "\(adapterCount)")
-                SettingsInfoRow("Canonical shortcuts", "\(shortcutCount)")
-                SettingsInfoRow("Accessibility", accessibilityStatus)
-                SettingsInfoRow("Browser bridge", browserBridgeStatus)
+                ShortyPanel {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("App")
+                            .font(.headline)
+                        SettingsInfoRow("Version", versionBuild)
+                        SettingsInfoRow("Engine", engineStatus)
+                        SettingsInfoRow("Adapters loaded", "\(adapterCount)")
+                        SettingsInfoRow("Canonical shortcuts", "\(shortcutCount)")
+                        SettingsInfoRow("Accessibility", accessibilityStatus)
+                        SettingsInfoRow("Browser bridge", browserBridgeStatus)
+                    }
+                }
+
+                ShortyPanel {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Open Source")
+                            .font(.headline)
+                        Text("Shorty is free software under the GNU Affero General Public License, version 3 or later.")
+                            .foregroundColor(.secondary)
+                        SettingsInfoRow("SPDX", "AGPL-3.0-or-later")
+                        SettingsInfoRow("Copyright", "Copyright (C) 2026 Peyton Randolph")
+                        Text("Shorty is provided without warranty, including without the implied warranty of merchantability or fitness for a particular purpose.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        HStack {
+                            if let sourceURL = updateStatus.sourceURL {
+                                Link("Source Code", destination: sourceURL)
+                            }
+                            if let licenseURL = OpenSourceLinks.license {
+                                Link("License", destination: licenseURL)
+                            }
+                            if let supportURL = OpenSourceLinks.support {
+                                Link("Support", destination: supportURL)
+                            }
+                            if let securityURL = OpenSourceLinks.security {
+                                Link("Security", destination: securityURL)
+                            }
+                        }
+                    }
+                }
+
+                ShortyPanel {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Attributions")
+                            .font(.headline)
+                        AttributionRow(
+                            title: "Runtime libraries",
+                            detail: "No third-party runtime libraries are bundled in Shorty.app."
+                        )
+                        AttributionRow(
+                            title: "System frameworks",
+                            detail: "Apple frameworks are provided by macOS and the Xcode SDK."
+                        )
+                        AttributionRow(
+                            title: "Development tools",
+                            detail: "Tuist, SwiftLint, uv, pytest, ruff, hk, mise, Prettier, shellcheck, shfmt, actionlint, zizmor, rumdl, and pkl are used for development and validation but are not bundled into the app."
+                        )
+                    }
+                }
+
+                Spacer(minLength: 0)
             }
-
-            Spacer()
+            .padding()
         }
-        .padding()
+    }
+}
+
+private enum OpenSourceLinks {
+    static let license = URL(string: "https://github.com/peyton/shorty/blob/master/LICENSE")
+    static let support = URL(string: "mailto:shorty@peyton.app")
+    static let security = URL(string: "mailto:shorty@peyton.app?subject=Shorty%20security")
+}
+
+private struct AttributionRow: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .fontWeight(.medium)
+            Text(detail)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
