@@ -5,6 +5,7 @@ import SwiftUI
 
 struct StatusBarView: View {
     @StateObject private var snapshotStore: StatusBarSnapshotStore
+    @ObservedObject private var translationFeed: TranslationFeed
     private let engine: ShortcutEngine
 
     init(engine: ShortcutEngine) {
@@ -12,13 +13,17 @@ struct StatusBarView: View {
         _snapshotStore = StateObject(
             wrappedValue: StatusBarSnapshotStore(engine: engine)
         )
+        self.translationFeed = engine.translationFeed
     }
 
     var body: some View {
         StatusBarContentView(
             snapshot: snapshotStore.snapshot,
             eventTapEnabled: eventTapEnabledBinding,
-            actions: .live(engine: engine)
+            actions: .live(engine: engine),
+            recentTranslations: translationFeed.recentEvents,
+            dailyStats: translationFeed.dailyStats,
+            compactMode: engine.persistedSettings.compactPopoverMode
         )
         .onAppear {
             snapshotStore.refreshFromFrontmostApplication()
@@ -299,18 +304,30 @@ struct StatusBarContentView: View {
     let snapshot: StatusBarSnapshot
     let eventTapEnabled: Binding<Bool>
     let actions: StatusBarActions
+    var recentTranslations: [TranslationEvent]
+    var dailyStats: DailyUsageStats
+    var compactMode: Bool
 
     @State private var showsDetails: Bool
+    @State private var popoverSearch = ""
+    @State private var showLiveFeed = false
+    @FocusState private var searchFocused: Bool
 
     init(
         snapshot: StatusBarSnapshot,
         eventTapEnabled: Binding<Bool>,
         actions: StatusBarActions = .noop,
-        showsDetails: Bool = false
+        showsDetails: Bool = false,
+        recentTranslations: [TranslationEvent] = [],
+        dailyStats: DailyUsageStats = DailyUsageStats(),
+        compactMode: Bool = false
     ) {
         self.snapshot = snapshot
         self.eventTapEnabled = eventTapEnabled
         self.actions = actions
+        self.recentTranslations = recentTranslations
+        self.dailyStats = dailyStats
+        self.compactMode = compactMode
         _showsDetails = State(initialValue: showsDetails)
     }
 
@@ -323,21 +340,130 @@ struct StatusBarContentView: View {
 
         VStack(alignment: .leading, spacing: 14) {
             StatusHeader(snapshot: snapshot)
+
+            // Bridge/web indicator (#33, #35)
+            if snapshot.webDomain != "None", snapshot.bridgeStatus != "Unavailable" {
+                BridgeIndicatorBanner(
+                    webDomain: snapshot.webDomain,
+                    bridgeStatus: snapshot.bridgeStatus
+                )
+            }
+
             PermissionBanner(snapshot: snapshot, actions: actions)
-            AvailableShortcutsSection(
-                presentation: presentation.shortcuts,
-                actions: actions
-            )
+
+            if !compactMode {
+                // Popover search (#8)
+                PopoverSearchField(searchText: $popoverSearch)
+                    .focused($searchFocused)
+
+                // Live feed toggle + available shortcuts (#6, #9)
+                Picker("View", selection: $showLiveFeed) {
+                    Text("Available").tag(false)
+                    Text("Activity").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .controlSize(.small)
+                .labelsHidden()
+
+                if showLiveFeed {
+                    LiveFeedView(
+                        events: recentTranslations,
+                        canonicalShortcuts: []
+                    )
+                } else {
+                    AvailableShortcutsSection(
+                        presentation: filteredPresentation(presentation.shortcuts),
+                        actions: actions
+                    )
+                }
+            }
+
             TranslationControlSection(
                 snapshot: snapshot,
                 eventTapEnabled: eventTapEnabled
             )
+
+            // Usage summary footer (#22)
+            if dailyStats.totalTranslations > 0 {
+                UsageSummaryRow(stats: dailyStats)
+            }
+
             DetailsSection(snapshot: snapshot, showsDetails: $showsDetails)
             StatusFooter(actions: actions)
         }
         .padding(16)
         .frame(width: 430)
         .accessibilityIdentifier("status-popover")
+    }
+
+    private func filteredPresentation(
+        _ original: StatusBarShortcutsPresentation
+    ) -> StatusBarShortcutsPresentation {
+        guard !popoverSearch.isEmpty else { return original }
+        let query = popoverSearch.lowercased()
+        let filtered = original.rows.filter {
+            $0.name.lowercased().contains(query)
+                || $0.defaultKeys.lowercased().contains(query)
+                || $0.actionDescription.lowercased().contains(query)
+        }
+        return StatusBarShortcutsPresentation(
+            title: original.title,
+            coverageDetail: original.coverageDetail,
+            rows: filtered,
+            emptyState: filtered.isEmpty
+                ? EmptyShortcutStatePresentation(
+                    title: "No matches",
+                    detail: "No shortcuts match \"\(popoverSearch)\".",
+                    showsAddButton: false
+                )
+                : nil,
+            showsPauseActions: original.showsPauseActions && filtered.count == original.rows.count,
+            showsResumeAction: original.showsResumeAction,
+            adapterGenerationMessage: original.adapterGenerationMessage,
+            hasGeneratedAdapterPreview: original.hasGeneratedAdapterPreview
+        )
+    }
+}
+
+/// Bridge connection indicator shown when a web adapter is active (#33, #35).
+private struct BridgeIndicatorBanner: View {
+    let webDomain: String
+    let bridgeStatus: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "globe")
+                .foregroundColor(ShortyBrand.teal)
+                .font(.caption)
+            Text(webDomain)
+                .font(.caption.weight(.medium))
+            Spacer()
+            Text(bridgeStatus)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(ShortyBrand.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Web app: \(webDomain), \(bridgeStatus)")
+    }
+}
+
+/// Usage summary row for the popover footer (#22).
+private struct UsageSummaryRow: View {
+    let stats: DailyUsageStats
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "chart.bar.fill")
+                .foregroundColor(ShortyBrand.teal)
+                .font(.caption2)
+            Text(stats.summaryText)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .accessibilityLabel(stats.summaryText)
     }
 }
 
@@ -481,6 +607,26 @@ struct StatusBarShortcutsPresentation: Equatable {
     let showsResumeAction: Bool
     let adapterGenerationMessage: String?
     let hasGeneratedAdapterPreview: Bool
+
+    init(
+        title: String,
+        coverageDetail: String,
+        rows: [ShortcutRowPresentation],
+        emptyState: EmptyShortcutStatePresentation?,
+        showsPauseActions: Bool,
+        showsResumeAction: Bool,
+        adapterGenerationMessage: String?,
+        hasGeneratedAdapterPreview: Bool
+    ) {
+        self.title = title
+        self.coverageDetail = coverageDetail
+        self.rows = rows
+        self.emptyState = emptyState
+        self.showsPauseActions = showsPauseActions
+        self.showsResumeAction = showsResumeAction
+        self.adapterGenerationMessage = adapterGenerationMessage
+        self.hasGeneratedAdapterPreview = hasGeneratedAdapterPreview
+    }
 
     init(snapshot: StatusBarSnapshot) {
         self.title = "Available now"
