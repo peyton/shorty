@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Checksum glyph</title>
+  <desc id="desc">A verified release checksum line.</desc>
+  <rect x="10" y="10" width="44" height="44" rx="10" fill="#ecf4f0" />
+  <path d="M21 33l8 8 15-19" fill="none" stroke="#0f766e" stroke-linecap="round" stroke-linejoin="round" stroke-width="6" />
+  <path d="M18 47h28" stroke="#111716" stroke-linecap="round" stroke-width="4" opacity=".28" />
+</svg>

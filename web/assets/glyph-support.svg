@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Support glyph</title>
+  <desc id="desc">A local support path routed through Shorty.</desc>
+  <rect x="10" y="14" width="44" height="36" rx="10" fill="#ecf4f0" />
+  <path d="M18 31h13c7 0 8-7 15-7" fill="none" stroke="#0f766e" stroke-linecap="round" stroke-width="5" />
+  <path d="M18 42h28" stroke="#111716" stroke-linecap="round" stroke-width="4" opacity=".32" />
+  <circle cx="46" cy="24" r="4" fill="#c18427" />
+</svg>

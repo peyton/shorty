@@ -25,14 +25,16 @@
     </header>
 
     <main class="body-page">
-      <p class="eyebrow">Support</p>
-      <h1>Shorty support</h1>
-      <p class="lede">
-        Use these checks first. Email
-        <a href="mailto:shorty@peyton.app">shorty@peyton.app</a> with the macOS
-        version, app name, and shortcut if Shorty still does not behave as
-        expected.
-      </p>
+      <div class="page-intro">
+        <p class="eyebrow">Support</p>
+        <h1>Shorty support</h1>
+        <p class="lede">
+          Run these checks first. Email
+          <a href="mailto:shorty@peyton.app">shorty@peyton.app</a> with the
+          macOS version, app name, and shortcut if Shorty still does not behave
+          as expected.
+        </p>
+      </div>
 
       <section aria-labelledby="download-title">
         <h2 id="download-title">Download and checksum</h2>
@@ -43,7 +45,7 @@
           >. Each app archive is paired with a <code>.sha256</code> file.
         </p>
         <div class="command-block">
-          <code>shasum -a 256 shorty-&lt;version&gt;-macos.zip</code>
+          <code>shasum -a 256<br />shorty-&lt;version&gt;-macos.zip</code>
         </div>
         <p>
           The command output should match the checksum line published with the
@@ -55,26 +57,54 @@
         <h2 id="setup-title">Accessibility setup</h2>
         <div class="support-list">
           <article class="support-item">
-            <strong>Grant access</strong>
-            <p>
-              Open Shorty, choose Open Accessibility Settings, then allow Shorty
-              in System Settings, Privacy & Security, Accessibility.
-            </p>
+            <img
+              class="glyph"
+              src="/assets/glyph-native.svg"
+              alt=""
+              width="48"
+              height="48"
+            />
+            <div>
+              <strong>Grant access</strong>
+              <p>
+                Open Shorty, choose Open Accessibility Settings, then allow
+                Shorty in System Settings, Privacy &amp; Security,
+                Accessibility.
+              </p>
+            </div>
           </article>
           <article class="support-item">
-            <strong>Check again</strong>
-            <p>
-              Return to the Shorty menu and choose Check Again. Shorty retries
-              the event tap without requiring a quit and reopen.
-            </p>
+            <img
+              class="glyph"
+              src="/assets/glyph-diagnostics.svg"
+              alt=""
+              width="48"
+              height="48"
+            />
+            <div>
+              <strong>Check again</strong>
+              <p>
+                Return to the Shorty menu and choose Check Again. Shorty retries
+                the event tap without requiring a quit and reopen.
+              </p>
+            </div>
           </article>
           <article class="support-item">
-            <strong>What Shorty needs</strong>
-            <p>
-              Accessibility access lets Shorty read menu item names, inspect
-              published shortcuts, and listen for the key combinations it
-              remaps.
-            </p>
+            <img
+              class="glyph"
+              src="/assets/glyph-support.svg"
+              alt=""
+              width="48"
+              height="48"
+            />
+            <div>
+              <strong>What Shorty needs</strong>
+              <p>
+                Accessibility access lets Shorty read menu item names, inspect
+                published shortcuts, and listen for the key combinations it
+                remaps.
+              </p>
+            </div>
           </article>
         </div>
       </section>
@@ -88,7 +118,7 @@
         </p>
         <div class="command-block">
           <code
-            >just install-browser-bridge EXTENSION_ID=&lt;extension-id&gt;
+            >just install-browser-bridge<br />EXTENSION_ID=&lt;extension-id&gt;<br />
             BROWSERS=chrome,brave,edge</code
           >
         </div>
@@ -98,7 +128,9 @@
           <code>.build/browser-bridge/shorty-bridge</code>.
         </p>
         <div class="command-block">
-          <code>just uninstall-browser-bridge BROWSERS=chrome,brave,edge</code>
+          <code
+            >just uninstall-browser-bridge<br />BROWSERS=chrome,brave,edge</code
+          >
         </div>
       </section>
 
@@ -106,26 +138,53 @@
         <h2 id="trouble-title">Troubleshooting</h2>
         <div class="support-list">
           <article class="support-item">
-            <strong>Shorty is not running</strong>
-            <p>
-              Open Shorty from Applications and look for the menu bar icon. If
-              it is missing, launch the app again before testing shortcuts.
-            </p>
+            <img
+              class="glyph"
+              src="/assets/app-icon.svg"
+              alt=""
+              width="48"
+              height="48"
+            />
+            <div>
+              <strong>Shorty is not running</strong>
+              <p>
+                Open Shorty from Applications and look for the menu bar icon. If
+                it is missing, launch the app again before testing shortcuts.
+              </p>
+            </div>
           </article>
           <article class="support-item">
-            <strong>Unsupported app pass-through</strong>
-            <p>
-              If the front app has no adapter, Shorty leaves the key press alone
-              and shows that the app is unsupported in the popover.
-            </p>
+            <img
+              class="glyph"
+              src="/assets/glyph-native.svg"
+              alt=""
+              width="48"
+              height="48"
+            />
+            <div>
+              <strong>Unsupported app pass-through</strong>
+              <p>
+                If the front app has no adapter, Shorty leaves the key press
+                alone and shows that the app is unsupported in the popover.
+              </p>
+            </div>
           </article>
           <article class="support-item">
-            <strong>Bridge not connected</strong>
-            <p>
-              Confirm the browser extension is loaded, the native messaging
-              manifest uses the same extension ID, and Shorty is already
-              running.
-            </p>
+            <img
+              class="glyph"
+              src="/assets/glyph-bridge.svg"
+              alt=""
+              width="48"
+              height="48"
+            />
+            <div>
+              <strong>Bridge not connected</strong>
+              <p>
+                Confirm the browser extension is loaded, the native messaging
+                manifest uses the same extension ID, and Shorty is already
+                running.
+              </p>
+            </div>
           </article>
         </div>
       </section>

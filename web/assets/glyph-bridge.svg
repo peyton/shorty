@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Browser bridge glyph</title>
+  <desc id="desc">A small bridge between a browser tab and Shorty.</desc>
+  <rect x="9" y="13" width="46" height="34" rx="9" fill="#111716" />
+  <rect x="16" y="21" width="32" height="18" rx="5" fill="#f8fbf8" />
+  <path d="M18 48c5-8 9-12 14-12s9 4 14 12" fill="none" stroke="#c18427" stroke-linecap="round" stroke-width="5" />
+  <path d="M20 30h24" stroke="#0f766e" stroke-linecap="round" stroke-width="5" />
+</svg>

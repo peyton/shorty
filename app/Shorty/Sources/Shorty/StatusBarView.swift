@@ -15,9 +15,8 @@ struct StatusBarView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             header
-            Divider()
             statusSummary
             activeAppSummary
             permissionActions
@@ -27,48 +26,57 @@ struct StatusBarView: View {
             footer
         }
         .padding()
-        .frame(width: 340)
+        .frame(width: 360)
     }
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "keyboard.fill")
-                .font(.title2)
+            ShortyMarkView(size: 38)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Shorty")
                     .font(.headline)
-                Text("Shortcut translation")
+                Text("Command map")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
             Spacer()
-            Circle()
-                .fill(engine.status.isHealthy ? Color.green : Color.orange)
-                .frame(width: 9, height: 9)
-                .accessibilityLabel(engine.status.title)
+            ShortyStatusDot(status: engine.status)
         }
     }
 
     private var statusSummary: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(engine.status.title)
-                .font(.callout)
-                .fontWeight(.semibold)
-            Text(engine.status.detail)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        ShortyPanel {
+            HStack(alignment: .top, spacing: 10) {
+                Image(
+                    systemName: engine.status.isHealthy
+                        ? "checkmark.circle.fill"
+                        : "exclamationmark.triangle.fill"
+                )
+                    .foregroundColor(ShortyBrand.statusColor(for: engine.status))
+                    .font(.callout)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(engine.status.title)
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                    Text(engine.status.detail)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 
     private var activeAppSummary: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            infoRow("Active app", engine.appMonitor.currentAppName ?? "Unknown")
-            infoRow("Coverage", coverageText)
-            if let lifecycleMessage = engine.eventTap.lifecycleMessage {
-                Label(lifecycleMessage, systemImage: "arrow.clockwise")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 8) {
+                infoRow("Active app", engine.appMonitor.currentAppName ?? "Unknown")
+                infoRow("Coverage", coverageText)
+                if let lifecycleMessage = engine.eventTap.lifecycleMessage {
+                    Label(lifecycleMessage, systemImage: "arrow.clockwise")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
     }
@@ -76,72 +84,78 @@ struct StatusBarView: View {
     @ViewBuilder
     private var permissionActions: some View {
         if engine.status == .permissionRequired {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Button("Open Accessibility Settings") {
-                        ShortcutEngine.requestAccessibilityPermission()
-                    }
-                    .buttonStyle(.borderedProminent)
+            ShortyPanel {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Button("Open Accessibility Settings") {
+                            ShortcutEngine.requestAccessibilityPermission()
+                        }
+                        .buttonStyle(.borderedProminent)
 
-                    Button("Check Again") {
-                        engine.checkAccessibilityAndRetry()
+                        Button("Check Again") {
+                            engine.checkAccessibilityAndRetry()
+                        }
                     }
-                }
-                .controlSize(.small)
+                    .controlSize(.small)
 
-                DisclosureGroup("What Shorty needs", isExpanded: $showsPermissionHelp) {
-                    Text("Shorty uses macOS Accessibility permission to listen for your shortcut keys and translate them only for supported apps. It does not need a network service for native app shortcuts.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
+                    DisclosureGroup("What Shorty needs", isExpanded: $showsPermissionHelp) {
+                        Text("Shorty uses macOS Accessibility permission to listen for your shortcut keys and translate them only for supported apps. It does not need a network service for native app shortcuts.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
+                    }
+                    .font(.caption)
                 }
-                .font(.caption)
             }
         }
     }
 
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle("Shorty enabled", isOn: eventTapEnabledBinding)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .disabled(engine.status == .permissionRequired)
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Shorty enabled", isOn: eventTapEnabledBinding)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(engine.status == .permissionRequired)
 
-            if !engine.eventTap.isEnabled {
-                Text("Shorty is passing every shortcut through unchanged.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if !engine.eventTap.isEnabled {
+                    Text("Shorty is passing every shortcut through unchanged.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
     }
 
     private var advancedDiagnostics: some View {
-        DisclosureGroup("Advanced Diagnostics", isExpanded: $showsAdvancedDiagnostics) {
-            VStack(alignment: .leading, spacing: 8) {
-                infoRow("Effective ID", engine.appMonitor.effectiveAppID ?? "None")
-                infoRow("Adapter source", adapter?.source.rawValue ?? "none")
-                infoRow("Mappings", adapter.map { "\($0.mappings.count)" } ?? "0")
-                infoRow("Web domain", normalizedWebDomain)
-                infoRow("Bridge", engine.browserBridge?.status.title ?? "Unavailable")
-                infoRow("Intercepted", "\(engine.eventTap.eventsIntercepted)")
-                infoRow("Remapped", "\(engine.eventTap.eventsRemapped)")
+        ShortyPanel {
+            DisclosureGroup("Advanced Diagnostics", isExpanded: $showsAdvancedDiagnostics) {
+                VStack(alignment: .leading, spacing: 8) {
+                    infoRow("Effective ID", engine.appMonitor.effectiveAppID ?? "None")
+                    infoRow("Adapter source", adapter?.source.rawValue ?? "none")
+                    infoRow("Mappings", adapter.map { "\($0.mappings.count)" } ?? "0")
+                    infoRow("Web domain", normalizedWebDomain)
+                    infoRow("Bridge", engine.browserBridge?.status.title ?? "Unavailable")
+                    infoRow("Intercepted", "\(engine.eventTap.eventsIntercepted)")
+                    infoRow("Remapped", "\(engine.eventTap.eventsRemapped)")
 
-                if !engine.registry.validationMessages.isEmpty {
-                    Text("Adapter validation warnings")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                    ForEach(engine.registry.validationMessages, id: \.self) { message in
-                        Text(message)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
+                    if !engine.registry.validationMessages.isEmpty {
+                        Text("Adapter validation warnings")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        ForEach(engine.registry.validationMessages, id: \.self) { message in
+                            Text(message)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                        }
                     }
                 }
+                .padding(.top, 6)
             }
-            .padding(.top, 6)
+            .font(.caption)
         }
-        .font(.caption)
     }
 
     private var footer: some View {
@@ -191,6 +205,7 @@ struct StatusBarView: View {
             Spacer()
             Text(value)
                 .fontWeight(.medium)
+                .foregroundColor(.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
