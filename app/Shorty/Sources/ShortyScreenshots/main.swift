@@ -39,7 +39,7 @@ private struct ScreenshotRenderer {
                 initialTab: .shortcuts
             ),
             name: "native-settings-shortcuts.png",
-            size: CGSize(width: 720, height: 560),
+            size: CGSize(width: 840, height: 660),
             scale: 2
         )
 
@@ -50,14 +50,35 @@ private struct ScreenshotRenderer {
                 initialTab: .adapters
             ),
             name: "native-settings-apps.png",
-            size: CGSize(width: 720, height: 560),
+            size: CGSize(width: 840, height: 660),
+            scale: 2
+        )
+
+        try render(
+            NativeStatusPopover(snapshot: fixtures.activeStatus),
+            name: "native-status-popover.png",
+            size: CGSize(width: 500, height: 640),
             scale: 2
         )
 
         try render(
             NativeStatusPopover(snapshot: fixtures.permissionStatus),
-            name: "native-status-popover.png",
-            size: CGSize(width: 390, height: 520),
+            name: "native-status-permission.png",
+            size: CGSize(width: 500, height: 640),
+            scale: 2
+        )
+
+        try render(
+            NativeStatusPopover(snapshot: fixtures.pausedStatus),
+            name: "native-status-paused.png",
+            size: CGSize(width: 500, height: 640),
+            scale: 2
+        )
+
+        try render(
+            NativeStatusPopover(snapshot: fixtures.noAdapterStatus),
+            name: "native-status-no-adapter.png",
+            size: CGSize(width: 500, height: 640),
             scale: 2
         )
 
@@ -223,8 +244,24 @@ private struct ScreenshotFixtures {
     let settings: SettingsSnapshot
     let activeStatus: StatusBarSnapshot
     let permissionStatus: StatusBarSnapshot
+    let pausedStatus: StatusBarSnapshot
+    let noAdapterStatus: StatusBarSnapshot
 
     init() {
+        let activeAvailability = Self.availability(
+            for: "com.linear",
+            displayName: "Linear"
+        )
+        let safariAvailability = Self.availability(
+            for: "com.apple.Safari",
+            displayName: "Safari"
+        )
+        let noAdapterAvailability = ShortcutAvailability(
+            state: .noAdapter,
+            appIdentifier: "com.example.notes",
+            appDisplayName: "Acme Notes"
+        )
+
         settings = SettingsSnapshot(
             shortcuts: CanonicalShortcut.defaults,
             shortcutProfile: .releaseDefault,
@@ -241,13 +278,17 @@ private struct ScreenshotFixtures {
                 state: .bundled,
                 detail: "The Safari extension is included with this build. Enable it in Safari Settings before using web-app adapters in Safari."
             ),
+            launchAtLoginStatus: LaunchAtLoginStatus(
+                state: .enabled,
+                detail: "Shorty will open automatically when you sign in."
+            ),
             updateStatus: UpdateStatus(
                 state: .idle,
                 currentVersion: "1.0.0",
                 automaticChecksEnabled: true,
                 detail: "Updates are ready for signed direct-download builds."
             ),
-            firstRunComplete: false,
+            firstRunComplete: true,
             diagnostics: RuntimeDiagnosticSnapshot(
                 engineStatus: "Shorty is active",
                 permissionState: .granted,
@@ -264,20 +305,32 @@ private struct ScreenshotFixtures {
                 eventsIntercepted: 184,
                 eventsRemapped: 57,
                 adapterValidationMessages: []
-            )
+            ),
+            displayStatus: EngineDisplayStatus.make(
+                status: .running,
+                permissionState: .granted,
+                eventTapEnabled: true,
+                isWaitingForPermission: false
+            ),
+            activeAppName: "Linear",
+            activeAvailability: activeAvailability,
+            isWaitingForAccessibilityPermission: false
         )
 
         activeStatus = StatusBarSnapshot(
-            statusTitle: "Shorty is active",
-            statusDetail: "Supported app shortcuts are being translated.",
-            statusIsHealthy: true,
+            status: EngineDisplayStatus.make(
+                status: .running,
+                permissionState: .granted,
+                eventTapEnabled: true,
+                isWaitingForPermission: false
+            ),
             currentAppName: "Linear",
-            coverageText: "2 shortcuts for Linear",
+            activeContextTitle: "Linear",
+            availability: activeAvailability,
             lifecycleMessage: nil,
-            requiresPermission: false,
             effectiveID: "com.linear",
-            adapterSource: "builtin",
-            mappingCount: "2",
+            adapterSource: "Built-in",
+            mappingCount: "\(activeAvailability.shortcuts.count)",
             webDomain: "None",
             browserContextSource: "No browser context",
             bridgeStatus: "Browser bridge ready",
@@ -285,20 +338,25 @@ private struct ScreenshotFixtures {
             shortcutReviewCount: UserShortcutProfile.releaseDefault.conflicts().count,
             eventsIntercepted: 184,
             eventsRemapped: 57,
-            validationMessages: []
+            validationMessages: [],
+            adapterGenerationMessage: nil,
+            hasGeneratedAdapterPreview: false
         )
 
         permissionStatus = StatusBarSnapshot(
-            statusTitle: "Accessibility permission needed",
-            statusDetail: "macOS requires Accessibility permission before Shorty can listen for keyboard shortcuts.",
-            statusIsHealthy: false,
+            status: EngineDisplayStatus.make(
+                status: .permissionRequired,
+                permissionState: .notGranted,
+                eventTapEnabled: true,
+                isWaitingForPermission: true
+            ),
             currentAppName: "Safari",
-            coverageText: "Pass through until access is granted",
+            activeContextTitle: "Safari",
+            availability: safariAvailability,
             lifecycleMessage: nil,
-            requiresPermission: true,
             effectiveID: "com.apple.Safari",
-            adapterSource: "builtin",
-            mappingCount: "4",
+            adapterSource: "Built-in",
+            mappingCount: "\(safariAvailability.shortcuts.count)",
             webDomain: "None",
             browserContextSource: "No browser context",
             bridgeStatus: "Browser bridge stopped",
@@ -306,8 +364,75 @@ private struct ScreenshotFixtures {
             shortcutReviewCount: UserShortcutProfile.releaseDefault.conflicts().count,
             eventsIntercepted: 0,
             eventsRemapped: 0,
-            validationMessages: []
+            validationMessages: [],
+            adapterGenerationMessage: nil,
+            hasGeneratedAdapterPreview: false
         )
+
+        pausedStatus = StatusBarSnapshot(
+            status: EngineDisplayStatus.make(
+                status: .disabled,
+                permissionState: .granted,
+                eventTapEnabled: false,
+                isWaitingForPermission: false
+            ),
+            currentAppName: "Linear",
+            activeContextTitle: "Linear",
+            availability: activeAvailability,
+            lifecycleMessage: nil,
+            effectiveID: "com.linear",
+            adapterSource: "Built-in",
+            mappingCount: "\(activeAvailability.shortcuts.count)",
+            webDomain: "None",
+            browserContextSource: "No browser context",
+            bridgeStatus: "Browser bridge ready",
+            safariExtensionStatus: "Safari extension bundled",
+            shortcutReviewCount: UserShortcutProfile.releaseDefault.conflicts().count,
+            eventsIntercepted: 184,
+            eventsRemapped: 57,
+            validationMessages: [],
+            adapterGenerationMessage: nil,
+            hasGeneratedAdapterPreview: false
+        )
+
+        noAdapterStatus = StatusBarSnapshot(
+            status: EngineDisplayStatus.make(
+                status: .running,
+                permissionState: .granted,
+                eventTapEnabled: true,
+                isWaitingForPermission: false
+            ),
+            currentAppName: "Acme Notes",
+            activeContextTitle: "Acme Notes",
+            availability: noAdapterAvailability,
+            lifecycleMessage: nil,
+            effectiveID: "com.example.notes",
+            adapterSource: "none",
+            mappingCount: "0",
+            webDomain: "None",
+            browserContextSource: "No browser context",
+            bridgeStatus: "Browser bridge ready",
+            safariExtensionStatus: "Safari extension bundled",
+            shortcutReviewCount: UserShortcutProfile.releaseDefault.conflicts().count,
+            eventsIntercepted: 184,
+            eventsRemapped: 57,
+            validationMessages: [],
+            adapterGenerationMessage: "No matching shortcuts were found in Acme Notes.",
+            hasGeneratedAdapterPreview: false
+        )
+    }
+
+    private static func availability(
+        for appID: String,
+        displayName: String
+    ) -> ShortcutAvailability {
+        AdapterRegistry(appSupportDirectory: temporaryAppSupportDirectory())
+            .availability(for: appID, displayName: displayName)
+    }
+
+    private static func temporaryAppSupportDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("ShortyScreenshots", isDirectory: true)
     }
 
     private static var adapters: [Adapter] {
@@ -340,23 +465,6 @@ private struct ScreenshotFixtures {
                 appIdentifier: "com.linear",
                 appName: "Linear",
                 mappings: [
-                    .init(
-                        canonicalID: "command_palette",
-                        method: .keyRemap,
-                        nativeKeys: KeyCombo(keyCode: 0x28, modifiers: .command)
-                    ),
-                    .init(canonicalID: "find_in_page", method: .passthrough)
-                ]
-            ),
-            Adapter(
-                appIdentifier: "com.tinyspeck.slackmacgap",
-                appName: "Slack",
-                mappings: [
-                    .init(
-                        canonicalID: "newline_in_field",
-                        method: .keyRemap,
-                        nativeKeys: KeyCombo(keyCode: 0x24, modifiers: .option)
-                    ),
                     .init(
                         canonicalID: "command_palette",
                         method: .keyRemap,
@@ -424,7 +532,7 @@ private struct NativeSettingsWindow: View {
                 snapshot: snapshot,
                 initialTab: initialTab
             )
-            .frame(width: 680, height: 480)
+            .frame(width: 780, height: 560)
         }
         .padding(20)
         .background(ScreenshotPalette.backdrop)
@@ -438,8 +546,10 @@ private struct NativeStatusPopover: View {
         PopoverFrame {
             StatusBarContentView(
                 snapshot: snapshot,
-                eventTapEnabled: .constant(!snapshot.requiresPermission),
-                showsPermissionHelp: true
+                eventTapEnabled: .constant(
+                    !snapshot.requiresPermission && snapshot.status.title != "Paused"
+                ),
+                showsDetails: snapshot.status.title == "Paused"
             )
         }
         .padding(24)
@@ -515,7 +625,7 @@ private struct ShortcutsMarketingVisual: View {
                     snapshot: fixtures.settings,
                     initialTab: .shortcuts
                 )
-                .frame(width: 680, height: 480)
+                .frame(width: 780, height: 560)
             }
             .scaleEffect(1.18)
             .offset(x: -116, y: -74)
@@ -524,7 +634,7 @@ private struct ShortcutsMarketingVisual: View {
                 StatusBarContentView(
                     snapshot: fixtures.activeStatus,
                     eventTapEnabled: .constant(true),
-                    showsAdvancedDiagnostics: true
+                    showsDetails: true
                 )
             }
             .frame(width: 430)
@@ -544,7 +654,7 @@ private struct AppsMarketingVisual: View {
                     snapshot: fixtures.settings,
                     initialTab: .adapters
                 )
-                .frame(width: 680, height: 480)
+                .frame(width: 780, height: 560)
             }
             .scaleEffect(1.24)
             .offset(x: -88, y: 22)
@@ -567,8 +677,7 @@ private struct SetupMarketingVisual: View {
             PopoverFrame {
                 StatusBarContentView(
                     snapshot: fixtures.permissionStatus,
-                    eventTapEnabled: .constant(false),
-                    showsPermissionHelp: true
+                    eventTapEnabled: .constant(false)
                 )
             }
             .frame(width: 540)

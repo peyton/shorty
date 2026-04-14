@@ -23,6 +23,7 @@ public final class ShortcutEngine: ObservableObject {
     @Published public private(set) var isRunning: Bool = false
     @Published public private(set) var status: EngineStatus = .stopped
     @Published public private(set) var permissionState: PermissionState = .unknown
+    @Published public private(set) var isWaitingForAccessibilityPermission: Bool = false
     @Published public private(set) var shortcutProfile: UserShortcutProfile
     @Published public private(set) var updateStatus: UpdateStatus
     @Published public private(set) var safariExtensionStatus = SafariExtensionStatus()
@@ -39,6 +40,7 @@ public final class ShortcutEngine: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var appChangeObserverInstalled = false
     private var adapterGenerationInFlight = Set<String>()
+    private var accessibilityPermissionTimer: Timer?
     private let userDefaults: UserDefaults
     private let safariExtensionUserDefaults: UserDefaults?
 
@@ -113,6 +115,7 @@ public final class ShortcutEngine: ObservableObject {
 
         guard permissionState.isGranted else {
             setStatus(.permissionRequired)
+            startAccessibilityPermissionMonitor(waitingForUser: false)
             return
         }
 
@@ -129,6 +132,7 @@ public final class ShortcutEngine: ObservableObject {
     }
 
     public func stop() {
+        stopAccessibilityPermissionMonitor()
         eventTap.stop()
         browserBridge?.stop()
         adapterGenerationInFlight.removeAll()
@@ -142,6 +146,7 @@ public final class ShortcutEngine: ObservableObject {
         refreshPermissionState()
         guard permissionState.isGranted else {
             setStatus(.permissionRequired)
+            startAccessibilityPermissionMonitor(waitingForUser: false)
             return
         }
 
@@ -155,6 +160,20 @@ public final class ShortcutEngine: ObservableObject {
 
     public func refreshPermissionState() {
         permissionState = Self.hasAccessibilityPermission ? .granted : .notGranted
+        if permissionState.isGranted {
+            stopAccessibilityPermissionMonitor()
+        }
+    }
+
+    public func openAccessibilitySettings() {
+        Self.requestAccessibilityPermission()
+        refreshPermissionState()
+        guard !permissionState.isGranted else {
+            checkAccessibilityAndRetry()
+            return
+        }
+        setStatus(.permissionRequired)
+        startAccessibilityPermissionMonitor(waitingForUser: true)
     }
 
     // MARK: - Adapter generation
@@ -520,5 +539,36 @@ public final class ShortcutEngine: ObservableObject {
         AXIsProcessTrustedWithOptions(
             [promptKey: true] as CFDictionary
         )
+    }
+
+    private func startAccessibilityPermissionMonitor(waitingForUser: Bool) {
+        if waitingForUser {
+            isWaitingForAccessibilityPermission = true
+        }
+        guard accessibilityPermissionTimer == nil else { return }
+
+        accessibilityPermissionTimer = Timer.scheduledTimer(
+            withTimeInterval: 1,
+            repeats: true
+        ) { [weak self] _ in
+            self?.pollAccessibilityPermission()
+        }
+    }
+
+    private func stopAccessibilityPermissionMonitor() {
+        accessibilityPermissionTimer?.invalidate()
+        accessibilityPermissionTimer = nil
+        isWaitingForAccessibilityPermission = false
+    }
+
+    private func pollAccessibilityPermission() {
+        permissionState = Self.hasAccessibilityPermission ? .granted : .notGranted
+        guard permissionState.isGranted else {
+            setStatus(.permissionRequired)
+            return
+        }
+
+        stopAccessibilityPermissionMonitor()
+        checkAccessibilityAndRetry()
     }
 }

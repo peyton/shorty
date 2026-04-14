@@ -73,6 +73,38 @@ public struct KeyCombo: Codable, Hashable, CustomStringConvertible {
         parts.append(KeyCodeMap.keyName(for: keyCode) ?? "0x\(String(keyCode, radix: 16))")
         return parts.joined(separator: "+")
     }
+
+    public var displayString: String {
+        var parts: [String] = []
+        if modifiers.contains(.control) { parts.append("⌃") }
+        if modifiers.contains(.option) { parts.append("⌥") }
+        if modifiers.contains(.shift) { parts.append("⇧") }
+        if modifiers.contains(.command) { parts.append("⌘") }
+        parts.append(Self.displayKeyName(for: keyCode))
+        return parts.joined()
+    }
+
+    private static let displayKeyNames: [String: String] = [
+        "return": "↩",
+        "tab": "⇥",
+        "space": "Space",
+        "delete": "⌫",
+        "escape": "Esc",
+        "leftarrow": "←",
+        "rightarrow": "→",
+        "uparrow": "↑",
+        "downarrow": "↓",
+        "pageup": "Page Up",
+        "pagedown": "Page Down",
+        "forwarddelete": "⌦"
+    ]
+
+    private static func displayKeyName(for keyCode: UInt16) -> String {
+        guard let key = KeyCodeMap.keyName(for: keyCode) else {
+            return "0x\(String(keyCode, radix: 16))"
+        }
+        return displayKeyNames[key] ?? key.uppercased()
+    }
 }
 
 // MARK: - Modifiers

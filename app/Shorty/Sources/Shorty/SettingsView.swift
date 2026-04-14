@@ -54,6 +54,9 @@ private final class SettingsSnapshotStore: ObservableObject {
         observe(engine.$permissionState) { [weak self] _ in
             self?.scheduleRefresh()
         }
+        observe(engine.$isWaitingForAccessibilityPermission) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
         observe(engine.$updateStatus) { [weak self] _ in
             self?.scheduleRefresh()
         }
@@ -166,10 +169,7 @@ enum SettingsTab: Hashable {
     case setup
     case shortcuts
     case adapters
-    case browsers
-    case updates
-    case diagnostics
-    case about
+    case advanced
 }
 
 struct SettingsSnapshot {
@@ -189,6 +189,10 @@ struct SettingsSnapshot {
     let updateStatus: UpdateStatus
     let firstRunComplete: Bool
     let diagnostics: RuntimeDiagnosticSnapshot
+    let displayStatus: EngineDisplayStatus
+    let activeAppName: String
+    let activeAvailability: ShortcutAvailability
+    let isWaitingForAccessibilityPermission: Bool
 
     static func live(
         engine: ShortcutEngine,
@@ -197,6 +201,8 @@ struct SettingsSnapshot {
         adapters: [Adapter]
     ) -> SettingsSnapshot {
         let diagnostics = engine.diagnosticSnapshot()
+        let appID = engine.appMonitor.effectiveAppID
+        let activeAppName = Self.activeContextTitle(engine: engine, appID: appID)
 
         return SettingsSnapshot(
             shortcuts: engine.shortcutProfile.shortcuts,
@@ -214,12 +220,42 @@ struct SettingsSnapshot {
             launchAtLoginStatus: engine.launchAtLoginStatus,
             updateStatus: engine.updateStatus,
             firstRunComplete: engine.isFirstRunComplete,
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            displayStatus: EngineDisplayStatus.make(
+                status: engine.status,
+                permissionState: engine.permissionState,
+                eventTapEnabled: engine.eventTap.isEnabled,
+                isWaitingForPermission: engine.isWaitingForAccessibilityPermission
+            ),
+            activeAppName: activeAppName,
+            activeAvailability: engine.registry.availability(
+                for: appID,
+                displayName: activeAppName
+            ),
+            isWaitingForAccessibilityPermission: engine.isWaitingForAccessibilityPermission
         )
+    }
+
+    private static func activeContextTitle(
+        engine: ShortcutEngine,
+        appID: String?
+    ) -> String {
+        let appName = engine.appMonitor.currentAppName ?? "Unknown"
+        guard let domain = engine.appMonitor.webAppDomain,
+              let appID,
+              appID.hasPrefix("web:")
+        else {
+            return appName
+        }
+
+        let adapterName = engine.registry.activeAdapter(for: appID)?.appName
+            ?? DomainNormalizer.normalizedDomain(for: domain)
+        return "\(adapterName) in \(appName)"
     }
 }
 
 struct SettingsActions {
+    let openAccessibilitySettings: () -> Void
     let generateForActiveApp: () -> Void
     let saveGeneratedAdapter: () -> Void
     let discardGeneratedAdapter: () -> Void
@@ -232,6 +268,7 @@ struct SettingsActions {
     let exportSupportBundle: () -> Void
 
     static let noop = SettingsActions(
+        openAccessibilitySettings: {},
         generateForActiveApp: {},
         saveGeneratedAdapter: {},
         discardGeneratedAdapter: {},
@@ -246,6 +283,7 @@ struct SettingsActions {
 
     static func live(engine: ShortcutEngine) -> SettingsActions {
         SettingsActions(
+            openAccessibilitySettings: { engine.openAccessibilitySettings() },
             generateForActiveApp: { engine.generateAdapterForCurrentApp() },
             saveGeneratedAdapter: { engine.saveGeneratedAdapterPreview() },
             discardGeneratedAdapter: { engine.discardGeneratedAdapterPreview() },
@@ -317,11 +355,17 @@ struct SettingsContentView: View {
 
     private var filteredAdapters: [Adapter] {
         let query = adapterSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let activeID = snapshot.activeAvailability.adapterIdentifier
         return snapshot.adapters
             .filter { adapter in
                 query.isEmpty
                     || adapter.appName.localizedCaseInsensitiveContains(query)
                     || adapter.appIdentifier.localizedCaseInsensitiveContains(query)
+            }
+            .sorted { lhs, rhs in
+                if lhs.appIdentifier == activeID { return true }
+                if rhs.appIdentifier == activeID { return false }
+                return lhs.appName.localizedCaseInsensitiveCompare(rhs.appName) == .orderedAscending
             }
     }
 
@@ -366,6 +410,8 @@ struct SettingsContentView: View {
                 generationMessage: snapshot.adapterGenerationMessage,
                 generatedPreview: snapshot.generatedAdapterPreview,
                 canonicalByID: canonicalByID,
+                activeAvailability: snapshot.activeAvailability,
+                accessibilityGranted: snapshot.displayStatus.requiresPermission == false,
                 actions: actions
             )
             .tabItem {
@@ -373,48 +419,11 @@ struct SettingsContentView: View {
             }
             .tag(SettingsTab.adapters)
 
-            SettingsBrowsersTab(
-                safariStatus: snapshot.safariExtensionStatus,
-                bridgeStatus: snapshot.browserBridgeStatus,
-                diagnostics: snapshot.diagnostics,
-                actions: actions
-            )
+            SettingsAdvancedTab(snapshot: snapshot, actions: actions)
             .tabItem {
-                Label("Browsers", systemImage: "safari")
+                Label("Advanced", systemImage: "slider.horizontal.3")
             }
-            .tag(SettingsTab.browsers)
-
-            SettingsUpdatesTab(
-                updateStatus: snapshot.updateStatus,
-                actions: actions
-            )
-            .tabItem {
-                Label("Updates", systemImage: "arrow.down.circle")
-            }
-            .tag(SettingsTab.updates)
-
-            SettingsDiagnosticsTab(
-                diagnostics: snapshot.diagnostics,
-                actions: actions
-            )
-            .tabItem {
-                Label("Diagnostics", systemImage: "waveform.path.ecg")
-            }
-            .tag(SettingsTab.diagnostics)
-
-            SettingsAboutTab(
-                versionBuild: snapshot.versionBuild,
-                engineStatus: snapshot.engineStatus,
-                adapterCount: snapshot.adapters.count,
-                shortcutCount: snapshot.shortcuts.count,
-                accessibilityStatus: snapshot.accessibilityStatus,
-                browserBridgeStatus: snapshot.browserBridgeStatus,
-                updateStatus: snapshot.updateStatus
-            )
-            .tabItem {
-                Label("About", systemImage: "info.circle")
-            }
-            .tag(SettingsTab.about)
+            .tag(SettingsTab.advanced)
         }
         .frame(minWidth: 760, idealWidth: 820, minHeight: 540, idealHeight: 620)
         .onAppear {
@@ -431,47 +440,92 @@ private struct SettingsSetupTab: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 16) {
                 ShortyPanel {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Release setup")
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Get Shorty ready")
                             .font(.headline)
-                        Text("Finish the local checks that make Shorty safe to leave running every day.")
+                        Text("Shorty needs one macOS permission before it can translate shortcuts for the app in front.")
                             .foregroundColor(.secondary)
-                        SetupChecklistRow(
-                            title: "Accessibility",
-                            detail: "Required for shortcut translation and menu adapter generation.",
-                            isComplete: snapshot.accessibilityStatus == "Granted"
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        SetupPermissionRow(
+                            status: snapshot.displayStatus,
+                            actions: actions
                         )
                         SetupLaunchAtLoginRow(
                             status: snapshot.launchAtLoginStatus,
                             actions: actions
                         )
                         SetupChecklistRow(
-                            title: "Safari extension",
-                            detail: snapshot.safariExtensionStatus.detail,
-                            isComplete: snapshot.safariExtensionStatus.state == .enabled
+                            title: "Ready state",
+                            detail: snapshot.displayStatus.requiresPermission
+                                ? "Shortcuts pass through until access is granted."
+                                : "Accessibility access is granted.",
+                            isComplete: !snapshot.displayStatus.requiresPermission
                         )
-                        SetupChecklistRow(
-                            title: "Browser bridge",
-                            detail: snapshot.browserBridgeStatus,
-                            isComplete: snapshot.browserBridgeStatus.contains("ready")
-                                || snapshot.browserBridgeStatus.contains("connected")
-                        )
-                        SetupChecklistRow(
-                            title: "First-run review",
-                            detail: snapshot.firstRunComplete ? "Marked complete." : "Review setup before relying on remapping.",
-                            isComplete: snapshot.firstRunComplete
-                        )
-                        HStack {
-                            Button("Mark Setup Complete", action: actions.markFirstRunComplete)
+
+                        if !snapshot.firstRunComplete && !snapshot.displayStatus.requiresPermission {
+                            Button("Done", action: actions.markFirstRunComplete)
                                 .buttonStyle(.borderedProminent)
-                            Button("Reset Setup", action: actions.resetFirstRun)
                         }
+                    }
+                }
+
+                ShortyPanel {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Current app")
+                            .font(.headline)
+                        SettingsInfoRow("App", snapshot.activeAppName)
+                        SettingsInfoRow("Coverage", snapshot.activeAvailability.coverageTitle)
+                        Text(snapshot.activeAvailability.coverageDetail)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
             .padding()
+        }
+    }
+}
+
+private struct SetupPermissionRow: View {
+    let status: EngineDisplayStatus
+    let actions: SettingsActions
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Accessibility")
+                        .fontWeight(.medium)
+                    Text(status.requiresPermission ? status.detail : "Access granted.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } icon: {
+                Image(
+                    systemName: status.requiresPermission
+                        ? "exclamationmark.circle.fill"
+                        : "checkmark.circle.fill"
+                )
+                .foregroundColor(status.requiresPermission ? ShortyBrand.amber : ShortyBrand.teal)
+            }
+
+            Spacer()
+
+            if status.requiresPermission {
+                HStack(spacing: 8) {
+                    Button("Open Settings", action: actions.openAccessibilitySettings)
+                    if status.isWaitingForPermission {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+                .controlSize(.small)
+            }
         }
     }
 }
@@ -592,6 +646,217 @@ private struct SettingsShortcutList: View {
             }
         }
         .padding()
+    }
+}
+
+private struct SettingsAdvancedTab: View {
+    let snapshot: SettingsSnapshot
+    let actions: SettingsActions
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                AdvancedBrowsersSection(
+                    safariStatus: snapshot.safariExtensionStatus,
+                    bridgeStatus: snapshot.browserBridgeStatus,
+                    diagnostics: snapshot.diagnostics,
+                    actions: actions
+                )
+                AdvancedUpdatesSection(
+                    updateStatus: snapshot.updateStatus,
+                    actions: actions
+                )
+                AdvancedDiagnosticsSection(
+                    diagnostics: snapshot.diagnostics,
+                    validationMessages: snapshot.validationMessages,
+                    actions: actions
+                )
+                AdvancedSetupSection(
+                    firstRunComplete: snapshot.firstRunComplete,
+                    actions: actions
+                )
+                AdvancedAboutSection(
+                    versionBuild: snapshot.versionBuild,
+                    engineStatus: snapshot.engineStatus,
+                    adapterCount: snapshot.adapters.count,
+                    shortcutCount: snapshot.shortcuts.count,
+                    accessibilityStatus: snapshot.accessibilityStatus,
+                    browserBridgeStatus: snapshot.browserBridgeStatus,
+                    updateStatus: snapshot.updateStatus
+                )
+            }
+            .padding()
+        }
+    }
+}
+
+private struct AdvancedBrowsersSection: View {
+    let safariStatus: SafariExtensionStatus
+    let bridgeStatus: String
+    let diagnostics: RuntimeDiagnosticSnapshot
+    let actions: SettingsActions
+
+    var body: some View {
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Browsers")
+                    .font(.headline)
+                SettingsInfoRow("Safari", safariStatus.title)
+                Text(safariStatus.detail)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Open Safari Extension Settings", action: actions.openSafariExtensionSettings)
+                    .controlSize(.small)
+                Divider()
+                SettingsInfoRow("Chrome-family bridge", bridgeStatus)
+                SettingsInfoRow("Browser source", diagnostics.browserContextSource.title)
+                SettingsInfoRow("Web domain", diagnostics.webDomain ?? "None")
+            }
+        }
+    }
+}
+
+private struct AdvancedUpdatesSection: View {
+    let updateStatus: UpdateStatus
+    let actions: SettingsActions
+
+    @State private var automaticChecksEnabled: Bool
+
+    init(updateStatus: UpdateStatus, actions: SettingsActions) {
+        self.updateStatus = updateStatus
+        self.actions = actions
+        _automaticChecksEnabled = State(initialValue: updateStatus.automaticChecksEnabled)
+    }
+
+    var body: some View {
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Updates")
+                    .font(.headline)
+                Text(updateStatus.detail)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Toggle("Check for updates automatically", isOn: $automaticChecksEnabled)
+                    .onChange(of: automaticChecksEnabled) { nextValue in
+                        actions.setAutomaticUpdates(nextValue)
+                    }
+                SettingsInfoRow("Current version", updateStatus.currentVersion)
+                SettingsInfoRow("Last checked", formatted(updateStatus.lastCheckedAt))
+                if let sourceURL = updateStatus.sourceURL {
+                    Link("Source and release notes", destination: sourceURL)
+                }
+                Text("Manual update checks will appear here when Sparkle is bundled.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private func formatted(_ date: Date?) -> String {
+        guard let date else { return "Never" }
+        return DateFormatter.localizedString(
+            from: date,
+            dateStyle: .medium,
+            timeStyle: .short
+        )
+    }
+}
+
+private struct AdvancedDiagnosticsSection: View {
+    let diagnostics: RuntimeDiagnosticSnapshot
+    let validationMessages: [String]
+    let actions: SettingsActions
+
+    var body: some View {
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Diagnostics")
+                    .font(.headline)
+                SettingsInfoRow("Engine", diagnostics.engineStatus)
+                SettingsInfoRow("Permission", diagnostics.permissionState.rawValue)
+                SettingsInfoRow("Active app", diagnostics.currentAppName ?? "Unknown")
+                SettingsInfoRow("Effective app", diagnostics.effectiveAppID ?? "None")
+                SettingsInfoRow("Browser source", diagnostics.browserContextSource.title)
+                SettingsInfoRow("Events intercepted", "\(diagnostics.eventsIntercepted)")
+                SettingsInfoRow("Events translated", "\(diagnostics.eventsRemapped)")
+                Button("Export Support Bundle", action: actions.exportSupportBundle)
+                    .controlSize(.small)
+
+                if !validationMessages.isEmpty {
+                    Divider()
+                    Label(
+                        "\(validationMessages.count) adapter warning\(validationMessages.count == 1 ? "" : "s")",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundColor(ShortyBrand.amber)
+                }
+            }
+        }
+    }
+}
+
+private struct AdvancedSetupSection: View {
+    let firstRunComplete: Bool
+    let actions: SettingsActions
+
+    var body: some View {
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Setup state")
+                    .font(.headline)
+                SettingsInfoRow(
+                    "First-run setup",
+                    firstRunComplete ? "Complete" : "Not complete"
+                )
+                Button("Reset Setup", action: actions.resetFirstRun)
+                    .controlSize(.small)
+            }
+        }
+    }
+}
+
+private struct AdvancedAboutSection: View {
+    let versionBuild: String
+    let engineStatus: String
+    let adapterCount: Int
+    let shortcutCount: Int
+    let accessibilityStatus: String
+    let browserBridgeStatus: String
+    let updateStatus: UpdateStatus
+
+    var body: some View {
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("About")
+                    .font(.headline)
+                SettingsInfoRow("Version", versionBuild)
+                SettingsInfoRow("Engine", engineStatus)
+                SettingsInfoRow("Adapters", "\(adapterCount)")
+                SettingsInfoRow("Shortcuts", "\(shortcutCount)")
+                SettingsInfoRow("Accessibility", accessibilityStatus)
+                SettingsInfoRow("Browser bridge", browserBridgeStatus)
+                Text("Shorty is free software under AGPL-3.0-or-later.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                HStack {
+                    if let sourceURL = updateStatus.sourceURL {
+                        Link("Source", destination: sourceURL)
+                    }
+                    if let licenseURL = OpenSourceLinks.license {
+                        Link("License", destination: licenseURL)
+                    }
+                    if let supportURL = OpenSourceLinks.support {
+                        Link("Support", destination: supportURL)
+                    }
+                    if let securityURL = OpenSourceLinks.security {
+                        Link("Security", destination: securityURL)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -737,7 +1002,7 @@ private struct SettingsShortcutRow: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
-            ShortcutKeyBadge(text: shortcut.defaultKeys.description)
+            ShortcutKeyBadge(text: shortcut.defaultKeys.displayString)
         }
         .padding(.vertical, 2)
     }
@@ -751,14 +1016,23 @@ private struct SettingsAdaptersTab: View {
     let generationMessage: String?
     let generatedPreview: Adapter?
     let canonicalByID: [String: CanonicalShortcut]
+    let activeAvailability: ShortcutAvailability
+    let accessibilityGranted: Bool
     let actions: SettingsActions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            ActiveAppCoveragePanel(
+                availability: activeAvailability,
+                accessibilityGranted: accessibilityGranted,
+                actions: actions
+            )
+
             AdapterGenerationPanel(
                 message: generationMessage,
                 preview: generatedPreview,
                 canonicalByID: canonicalByID,
+                accessibilityGranted: accessibilityGranted,
                 actions: actions
             )
 
@@ -771,7 +1045,7 @@ private struct SettingsAdaptersTab: View {
 
             if !validationMessages.isEmpty {
                 Label(
-                    "\(validationMessages.count) adapter files were skipped. Open the menu bar diagnostics for details.",
+                    "\(validationMessages.count) adapter file\(validationMessages.count == 1 ? "" : "s") need review.",
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(.caption)
@@ -782,10 +1056,52 @@ private struct SettingsAdaptersTab: View {
     }
 }
 
+private struct ActiveAppCoveragePanel: View {
+    let availability: ShortcutAvailability
+    let accessibilityGranted: Bool
+    let actions: SettingsActions
+
+    var body: some View {
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Current app")
+                            .font(.headline)
+                        Text(availability.appDisplayName)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Text(availability.coverageTitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(availability.state == .available ? ShortyBrand.teal : .secondary)
+                }
+
+                Text(availability.coverageDetail)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if availability.state == .noAdapter {
+                    if accessibilityGranted {
+                        Button("Add Current App", action: actions.generateForActiveApp)
+                            .controlSize(.small)
+                    } else {
+                        Text("Grant Accessibility access before adding app support.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct AdapterGenerationPanel: View {
     let message: String?
     let preview: Adapter?
     let canonicalByID: [String: CanonicalShortcut]
+    let accessibilityGranted: Bool
     let actions: SettingsActions
 
     var body: some View {
@@ -793,14 +1109,25 @@ private struct AdapterGenerationPanel: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Generate Adapter")
+                        Text("Add Current App")
                             .font(.headline)
-                        Text("Create a local adapter from the active app's menus, then review it before saving.")
+                        Text("Read the active app's menus, then review the shortcuts before saving.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    Button("Generate for Active App", action: actions.generateForActiveApp)
+                    if accessibilityGranted {
+                        Button("Add Current App", action: actions.generateForActiveApp)
+                    }
+                }
+
+                if !accessibilityGranted {
+                    Label(
+                        "Grant Accessibility access before adding app support.",
+                        systemImage: "lock"
+                    )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                 }
 
                 if let message {
@@ -866,11 +1193,7 @@ private struct SettingsAdapterRow: View {
                 HStack {
                     Text(adapter.appName)
                         .fontWeight(.medium)
-                    if adapter.source != .builtin {
-                        Label("Review", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundColor(ShortyBrand.amber)
-                    }
+                    AdapterSourcePill(source: adapter.source)
                     Spacer()
                     Text("\(adapter.mappings.count) shortcuts")
                         .font(.caption)
@@ -886,6 +1209,19 @@ private struct SettingsAdapterRow: View {
 
     private func canonicalName(for canonicalID: String) -> String {
         canonicalByID[canonicalID]?.name ?? canonicalID
+    }
+}
+
+private struct AdapterSourcePill: View {
+    let source: Adapter.Source
+
+    var body: some View {
+        Text(source.settingsLabel)
+            .font(.caption2.weight(.semibold))
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.secondary.opacity(0.1), in: Capsule())
     }
 }
 
@@ -1027,7 +1363,7 @@ private func mappingDetail(_ mapping: Adapter.Mapping) -> String {
     switch mapping.method {
     case .keyRemap:
         if let nativeKeys = mapping.nativeKeys {
-            return "Send \(nativeKeys.description)"
+            return "Send \(nativeKeys.displayString)"
         }
         return "Missing native key combo"
     case .menuInvoke:
@@ -1061,5 +1397,22 @@ private func iconFor(_ category: CanonicalShortcut.Category) -> String {
         return "play.circle"
     case .system:
         return "gear"
+    }
+}
+
+private extension Adapter.Source {
+    var settingsLabel: String {
+        switch self {
+        case .builtin:
+            return "Built-in"
+        case .menuIntrospection:
+            return "Generated"
+        case .llmGenerated:
+            return "Generated"
+        case .community:
+            return "Community"
+        case .user:
+            return "User"
+        }
     }
 }
