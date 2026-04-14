@@ -7,7 +7,8 @@ source "$(cd -- "$(dirname -- "$0")" && pwd)/common.sh"
 setup_local_tooling_env
 
 extension_id="${SHORTY_CHROME_EXTENSION_ID:-}"
-manifest_dir="${CHROME_NATIVE_MESSAGING_HOSTS_DIR:-$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts}"
+browsers="${SHORTY_BROWSER_TARGETS:-chrome}"
+mode="install"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -15,9 +16,13 @@ while [ $# -gt 0 ]; do
     extension_id="$2"
     shift 2
     ;;
-  --manifest-dir)
-    manifest_dir="$2"
+  --browsers)
+    browsers="$2"
     shift 2
+    ;;
+  --uninstall)
+    mode="uninstall"
+    shift
     ;;
   *)
     printf 'Unknown argument: %s\n' "$1" >&2
@@ -26,8 +31,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+if [ "$mode" = "uninstall" ]; then
+  uv run python -m scripts.tooling.browser_manifest uninstall \
+    --browsers "$browsers"
+  exit 0
+fi
+
 if [ -z "$extension_id" ]; then
-  printf 'Usage: just install-browser-bridge EXTENSION_ID=<chrome-extension-id>\n' >&2
+  printf 'Usage: just install-browser-bridge EXTENSION_ID=<chrome-extension-id> [BROWSERS=chrome]\n' >&2
   exit 2
 fi
 
@@ -49,28 +60,19 @@ xcodebuild \
 bridge_product="$derived_data_path/Build/Products/Release/$BRIDGE_SCHEME"
 install_dir="$REPO_ROOT/.build/browser-bridge"
 bridge_path="$install_dir/shorty-bridge"
-manifest_path="$manifest_dir/com.shorty.browser_bridge.json"
 
 if [ ! -x "$bridge_product" ]; then
   printf 'Built bridge executable not found: %s\n' "$bridge_product" >&2
   exit 1
 fi
 
-mkdir -p "$install_dir" "$manifest_dir"
+mkdir -p "$install_dir"
 cp "$bridge_product" "$bridge_path"
 chmod +x "$bridge_path"
 
-cat >"$manifest_path" <<JSON
-{
-  "name": "com.shorty.browser_bridge",
-  "description": "Shorty browser context bridge",
-  "path": "$bridge_path",
-  "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://$extension_id/"
-  ]
-}
-JSON
+uv run python -m scripts.tooling.browser_manifest install \
+  --extension-id "$extension_id" \
+  --bridge-path "$bridge_path" \
+  --browsers "$browsers"
 
 printf 'Installed bridge executable: %s\n' "$bridge_path"
-printf 'Installed native messaging manifest: %s\n' "$manifest_path"

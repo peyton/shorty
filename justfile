@@ -24,8 +24,29 @@ test-app:
     bash scripts/tooling/test_app.sh
 
 [group('app')]
-install-browser-bridge EXTENSION_ID='':
-    extension_id="{{EXTENSION_ID}}"; extension_id="${extension_id#EXTENSION_ID=}"; bash scripts/tooling/install_browser_bridge.sh --extension-id "$extension_id"
+install-browser-bridge EXTENSION_ID='' BROWSERS='chrome':
+    extension_id="{{EXTENSION_ID}}"; extension_id="${extension_id#EXTENSION_ID=}"; browsers="{{BROWSERS}}"; browsers="${browsers#BROWSERS=}"; bash scripts/tooling/install_browser_bridge.sh --extension-id "$extension_id" --browsers "$browsers"
+
+[group('app')]
+uninstall-browser-bridge BROWSERS='chrome':
+    browsers="{{BROWSERS}}"; browsers="${browsers#BROWSERS=}"; bash scripts/tooling/install_browser_bridge.sh --uninstall --browsers "$browsers"
+
+[group('release')]
+release-preflight VERSION='local':
+    version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/release_preflight.sh --version "$version"
+
+[group('release')]
+app-package VERSION='local':
+    version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/app_package.sh --version "$version"
+
+[group('release')]
+app-notarize VERSION='local':
+    version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/app_notarize.sh --version "$version"
+
+[group('release')]
+release VERSION='local':
+    just app-package VERSION="{{VERSION}}"
+    just release-preflight VERSION="{{VERSION}}"
 
 [group('web')]
 web-serve PORT='8000':

@@ -10,9 +10,13 @@ import Foundation
 /// When no adapter exists for an app, the engine passes keystrokes through
 /// unmodified — Shorty is strictly opt-in per app.
 public final class AdapterRegistry: ObservableObject {
+    public static let maxAdapterFileSize = 256 * 1024
 
     /// All loaded adapters, keyed by app identifier.
     @Published public private(set) var adapters: [String: Adapter] = [:]
+
+    /// Non-fatal validation messages for adapters skipped during loading.
+    @Published public private(set) var validationMessages: [String] = []
 
     /// Loaded adapters as a stable collection for UI lists.
     public var allAdapters: [Adapter] {
@@ -26,18 +30,40 @@ public final class AdapterRegistry: ObservableObject {
     /// Rebuilt whenever canonical shortcuts change.
     private(set) var comboToCanonicalID: [KeyCombo: String] = [:]
 
+    /// Fast path used from the event tap: app ID -> canonical ID -> action.
+    private var actionIndex: [String: [String: ResolvedAction]] = [:]
+
+    private let fileManager: FileManager
     private let userAdapterDirectory: URL
     private let autoAdapterDirectory: URL
 
-    public init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+    public init(
+        fileManager: FileManager = .default,
+        appSupportDirectory: URL? = nil
+    ) {
+        self.fileManager = fileManager
+        let appSupport = appSupportDirectory
+            ?? fileManager.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let shortyDir = appSupport.appendingPathComponent("Shorty", isDirectory: true)
         self.userAdapterDirectory = shortyDir.appendingPathComponent("Adapters", isDirectory: true)
         self.autoAdapterDirectory = shortyDir.appendingPathComponent("AutoAdapters", isDirectory: true)
 
-        // Ensure directories exist
-        try? FileManager.default.createDirectory(at: userAdapterDirectory, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: autoAdapterDirectory, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(
+                at: userAdapterDirectory,
+                withIntermediateDirectories: true
+            )
+            try fileManager.createDirectory(
+                at: autoAdapterDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            ShortyLog.adapterRegistry.error("Failed to create adapter directories: \(error.localizedDescription)")
+        }
 
         rebuildComboIndex()
         loadAllAdapters()
@@ -64,26 +90,15 @@ public final class AdapterRegistry: ObservableObject {
     /// Returns the native KeyCombo to send, or nil if no remapping is needed.
     public func resolve(combo: KeyCombo, forApp appID: String) -> ResolvedAction? {
         guard let canonicalID = comboToCanonicalID[combo] else { return nil }
-        guard let adapter = adapters[appID] else { return nil }
-        guard let mapping = adapter.mappings.first(where: { $0.canonicalID == canonicalID }) else { return nil }
+        return actionIndex[appID]?[canonicalID]
+    }
 
-        switch mapping.method {
-        case .keyRemap:
-            guard let nativeKeys = mapping.nativeKeys else { return nil }
-            return .remap(nativeKeys)
-        case .menuInvoke:
-            guard let title = mapping.menuTitle else { return nil }
-            return .invokeMenu(title)
-        case .axAction:
-            guard let action = mapping.axAction else { return nil }
-            return .performAXAction(action)
-        case .passthrough:
-            return .passthrough
-        }
+    public func mappingCount(for appID: String) -> Int {
+        adapters[appID]?.mappings.count ?? 0
     }
 
     /// What the engine should do after resolving a canonical shortcut.
-    public enum ResolvedAction {
+    public enum ResolvedAction: Equatable {
         /// Rewrite the event to this key combo.
         case remap(KeyCombo)
         /// Suppress the event and invoke a menu item by title (Phase 2).
@@ -96,29 +111,168 @@ public final class AdapterRegistry: ObservableObject {
 
     // MARK: - Adapter management
 
+    public static func validate(
+        adapter: Adapter,
+        canonicals: [CanonicalShortcut] = CanonicalShortcut.defaults
+    ) throws {
+        try validateAdapterMetadata(adapter)
+        try validateMappings(adapter.mappings, canonicals: canonicals)
+    }
+
+    private static func validateAdapterMetadata(_ adapter: Adapter) throws {
+        let appIdentifier = adapter.appIdentifier.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !appIdentifier.isEmpty else {
+            throw AdapterValidationError.emptyAppIdentifier
+        }
+        guard appIdentifier.count <= 200,
+              !appIdentifier.contains("/"),
+              !appIdentifier.contains("\0")
+        else {
+            throw AdapterValidationError.invalidAppIdentifier(adapter.appIdentifier)
+        }
+
+        guard !adapter.appName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AdapterValidationError.emptyAppName
+        }
+        guard !adapter.mappings.isEmpty else {
+            throw AdapterValidationError.noMappings(adapter.appIdentifier)
+        }
+        guard adapter.mappings.count <= 100 else {
+            throw AdapterValidationError.tooManyMappings(adapter.appIdentifier)
+        }
+    }
+
+    private static func validateMappings(
+        _ mappings: [Adapter.Mapping],
+        canonicals: [CanonicalShortcut]
+    ) throws {
+        let canonicalIDs = Set(canonicals.map(\.id))
+        var seenCanonicalIDs = Set<String>()
+
+        for mapping in mappings {
+            try validateMapping(
+                mapping,
+                canonicalIDs: canonicalIDs,
+                seenCanonicalIDs: &seenCanonicalIDs
+            )
+        }
+    }
+
+    private static func validateMapping(
+        _ mapping: Adapter.Mapping,
+        canonicalIDs: Set<String>,
+        seenCanonicalIDs: inout Set<String>
+    ) throws {
+        guard canonicalIDs.contains(mapping.canonicalID) else {
+            throw AdapterValidationError.unknownCanonicalID(mapping.canonicalID)
+        }
+        guard seenCanonicalIDs.insert(mapping.canonicalID).inserted else {
+            throw AdapterValidationError.duplicateCanonicalID(mapping.canonicalID)
+        }
+        try validateContext(mapping.context, canonicalID: mapping.canonicalID)
+
+        switch mapping.method {
+        case .keyRemap:
+            try validateKeyRemap(mapping)
+        case .menuInvoke:
+            try validateMenuInvoke(mapping)
+        case .axAction:
+            try validateAXAction(mapping)
+        case .passthrough:
+            try validatePassthrough(mapping)
+        }
+    }
+
+    private static func validateContext(
+        _ context: String?,
+        canonicalID: String
+    ) throws {
+        guard let context else { return }
+        if context.isEmpty || context.count > 100 || context.contains("\0") {
+            throw AdapterValidationError.invalidContext(canonicalID)
+        }
+    }
+
+    private static func validateKeyRemap(_ mapping: Adapter.Mapping) throws {
+        guard mapping.nativeKeys != nil else {
+            throw AdapterValidationError.missingNativeKeys(mapping.canonicalID)
+        }
+        guard mapping.menuTitle == nil else {
+            throw AdapterValidationError.unexpectedMenuTitle(mapping.canonicalID)
+        }
+        guard mapping.axAction == nil else {
+            throw AdapterValidationError.unexpectedAXAction(mapping.canonicalID)
+        }
+    }
+
+    private static func validateMenuInvoke(_ mapping: Adapter.Mapping) throws {
+        guard mapping.nativeKeys == nil else {
+            throw AdapterValidationError.unexpectedNativeKeys(mapping.canonicalID)
+        }
+        guard let title = mapping.menuTitle?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ), !title.isEmpty, title.count <= 200 else {
+            throw AdapterValidationError.missingMenuTitle(mapping.canonicalID)
+        }
+        guard mapping.axAction == nil else {
+            throw AdapterValidationError.unexpectedAXAction(mapping.canonicalID)
+        }
+    }
+
+    private static func validateAXAction(_ mapping: Adapter.Mapping) throws {
+        guard mapping.nativeKeys == nil else {
+            throw AdapterValidationError.unexpectedNativeKeys(mapping.canonicalID)
+        }
+        guard mapping.menuTitle == nil else {
+            throw AdapterValidationError.unexpectedMenuTitle(mapping.canonicalID)
+        }
+        guard let action = mapping.axAction?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ), action.hasPrefix("AX"), action.count <= 100 else {
+            throw AdapterValidationError.missingAXAction(mapping.canonicalID)
+        }
+    }
+
+    private static func validatePassthrough(_ mapping: Adapter.Mapping) throws {
+        guard mapping.nativeKeys == nil else {
+            throw AdapterValidationError.unexpectedNativeKeys(mapping.canonicalID)
+        }
+        guard mapping.menuTitle == nil else {
+            throw AdapterValidationError.unexpectedMenuTitle(mapping.canonicalID)
+        }
+        guard mapping.axAction == nil else {
+            throw AdapterValidationError.unexpectedAXAction(mapping.canonicalID)
+        }
+    }
+
     /// Save an auto-generated adapter (from menu introspection).
     public func saveAutoAdapter(_ adapter: Adapter) throws {
-        let url = autoAdapterDirectory
-            .appendingPathComponent(adapter.appIdentifier.replacingOccurrences(of: ":", with: "_"))
-            .appendingPathExtension("json")
-        let data = try JSONEncoder.pretty.encode(adapter)
-        try data.write(to: url)
-        adapters[adapter.appIdentifier] = adapter
+        try save(adapter, to: autoAdapterDirectory)
     }
 
     /// Save a user-created adapter.
     public func saveUserAdapter(_ adapter: Adapter) throws {
-        let url = userAdapterDirectory
-            .appendingPathComponent(adapter.appIdentifier.replacingOccurrences(of: ":", with: "_"))
+        try save(adapter, to: userAdapterDirectory)
+    }
+
+    private func save(_ adapter: Adapter, to directory: URL) throws {
+        try Self.validate(adapter: adapter, canonicals: canonicalShortcuts)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory
+            .appendingPathComponent(safeAdapterFilename(for: adapter.appIdentifier))
             .appendingPathExtension("json")
         let data = try JSONEncoder.pretty.encode(adapter)
-        try data.write(to: url)
+        try data.write(to: url, options: .atomic)
         adapters[adapter.appIdentifier] = adapter
+        rebuildActionIndex()
     }
 
     /// Reload all adapters from disk (called after auto-generation saves a new one).
     public func reloadAdapters() {
         adapters.removeAll()
+        validationMessages.removeAll()
         loadAllAdapters()
     }
 
@@ -133,11 +287,13 @@ public final class AdapterRegistry: ObservableObject {
 
         // 3. Load user adapters (highest priority, override everything)
         loadAdapters(from: userAdapterDirectory)
+
+        rebuildActionIndex()
     }
 
     private func loadBuiltinAdapters() {
         guard let resourceURL = Self.bundledResourcesURL else {
-            print("[AdapterRegistry] No bundled Resources directory found")
+            ShortyLog.adapterRegistry.debug("No bundled Resources directory found")
             // Fall back to built-in adapters defined in code
             loadHardcodedAdapters()
             return
@@ -164,19 +320,30 @@ public final class AdapterRegistry: ObservableObject {
     }
 
     private func loadAdapters(from directory: URL) {
-        guard let contents = try? FileManager.default.contentsOfDirectory(
+        guard let contents = try? fileManager.contentsOfDirectory(
             at: directory,
-            includingPropertiesForKeys: nil,
+            includingPropertiesForKeys: [.fileSizeKey],
             options: .skipsHiddenFiles
         ) else { return }
 
         for fileURL in contents where fileURL.pathExtension == "json" {
-            guard let data = try? Data(contentsOf: fileURL),
-                  let adapter = try? JSONDecoder().decode(Adapter.self, from: data) else {
-                print("[AdapterRegistry] Failed to load adapter: \(fileURL.lastPathComponent)")
+            do {
+                let values = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+                let fileSize = values.fileSize ?? 0
+                guard fileSize <= Self.maxAdapterFileSize else {
+                    throw AdapterValidationError.fileTooLarge(fileSize)
+                }
+
+                let data = try Data(contentsOf: fileURL)
+                let adapter = try JSONDecoder().decode(Adapter.self, from: data)
+                try Self.validate(adapter: adapter, canonicals: canonicalShortcuts)
+                adapters[adapter.appIdentifier] = adapter
+            } catch {
+                let message = "\(fileURL.lastPathComponent): \(error)"
+                validationMessages.append(message)
+                ShortyLog.adapterRegistry.warning("Skipped adapter \(message)")
                 continue
             }
-            adapters[adapter.appIdentifier] = adapter
         }
     }
 
@@ -187,13 +354,55 @@ public final class AdapterRegistry: ObservableObject {
         }
     }
 
+    private func rebuildActionIndex() {
+        var nextIndex: [String: [String: ResolvedAction]] = [:]
+        for adapter in adapters.values {
+            var mappingIndex: [String: ResolvedAction] = [:]
+            for mapping in adapter.mappings {
+                guard let action = resolvedAction(for: mapping) else { continue }
+                mappingIndex[mapping.canonicalID] = action
+            }
+            nextIndex[adapter.appIdentifier] = mappingIndex
+        }
+        actionIndex = nextIndex
+    }
+
+    private func resolvedAction(for mapping: Adapter.Mapping) -> ResolvedAction? {
+        switch mapping.method {
+        case .keyRemap:
+            guard let nativeKeys = mapping.nativeKeys else { return nil }
+            return .remap(nativeKeys)
+        case .menuInvoke:
+            guard let title = mapping.menuTitle else { return nil }
+            return .invokeMenu(title)
+        case .axAction:
+            guard let action = mapping.axAction else { return nil }
+            return .performAXAction(action)
+        case .passthrough:
+            return .passthrough
+        }
+    }
+
+    private func safeAdapterFilename(for appIdentifier: String) -> String {
+        appIdentifier
+            .replacingOccurrences(of: ":", with: "_")
+            .replacingOccurrences(of: "/", with: "_")
+    }
+
     // MARK: - Hardcoded adapters for the top 20 apps
 
     private func loadHardcodedAdapters() {
         let builtins = Self.builtinAdapters
         // Only insert if not already loaded from JSON.
         for adapter in builtins where adapters[adapter.appIdentifier] == nil {
-            adapters[adapter.appIdentifier] = adapter
+            do {
+                try Self.validate(adapter: adapter, canonicals: canonicalShortcuts)
+                adapters[adapter.appIdentifier] = adapter
+            } catch {
+                let message = "\(adapter.appIdentifier): \(error)"
+                validationMessages.append(message)
+                ShortyLog.adapterRegistry.error("Invalid built-in adapter \(message)")
+            }
         }
     }
 

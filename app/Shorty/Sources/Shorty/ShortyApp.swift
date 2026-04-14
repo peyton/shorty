@@ -1,35 +1,55 @@
-import SwiftUI
+import AppKit
 import ShortyCore
+import SwiftUI
 
-/// The main entry point for Shorty — a menu-bar-only macOS app.
-///
-/// We use `MenuBarExtra` (macOS 13+) to place an icon in the system
-/// status bar. There is no dock icon or main window.
+final class ShortyAppDelegate: NSObject, NSApplicationDelegate {
+    let engine = ShortcutEngine()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        engine.start()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        engine.stop()
+    }
+}
+
 @main
 struct ShortyApp: App {
-    @StateObject private var engine = ShortcutEngine()
+    @NSApplicationDelegateAdaptor(ShortyAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        // Menu bar icon + popover
         MenuBarExtra {
-            StatusBarView(engine: engine)
+            StatusBarView(engine: appDelegate.engine)
         } label: {
-            // SF Symbol for keyboard
-            Image(systemName: engine.isRunning ? "keyboard.fill" : "keyboard")
-                .onAppear {
-                    engine.start()
-                }
+            StatusIconView(engine: appDelegate.engine)
         }
         .menuBarExtraStyle(.window)
 
-        // Settings window (opened from the menu)
         Settings {
-            SettingsView(engine: engine)
+            SettingsView(engine: appDelegate.engine)
         }
     }
+}
 
-    init() {
-        // Hide dock icon — we're a pure menu-bar app.
-        NSApp.setActivationPolicy(.accessory)
+private struct StatusIconView: View {
+    @ObservedObject var engine: ShortcutEngine
+
+    var body: some View {
+        Image(systemName: iconName)
+    }
+
+    private var iconName: String {
+        switch engine.status {
+        case .running:
+            return "keyboard.fill"
+        case .disabled:
+            return "keyboard"
+        case .permissionRequired, .failed:
+            return "exclamationmark.triangle.fill"
+        case .stopped, .starting:
+            return "keyboard"
+        }
     }
 }

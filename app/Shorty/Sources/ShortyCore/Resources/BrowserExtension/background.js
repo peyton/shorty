@@ -11,46 +11,76 @@
  */
 
 const NATIVE_HOST = "com.shorty.browser_bridge";
+const REPORT_ALL_DOMAINS = false;
+const SUPPORTED_DOMAINS = [
+  "notion.so",
+  "slack.com",
+  "mail.google.com",
+  "docs.google.com",
+  "figma.com",
+  "linear.app",
+];
 
 let port = null;
+let lastSentDomain = null;
+let reconnectTimer = null;
+
+function normalizeSupportedDomain(hostname) {
+  const cleaned = hostname.toLowerCase().replace(/^\.+|\.+$/g, "");
+  const withoutWWW = cleaned.startsWith("www.") ? cleaned.slice(4) : cleaned;
+
+  for (const domain of SUPPORTED_DOMAINS) {
+    if (withoutWWW === domain || withoutWWW.endsWith(`.${domain}`)) {
+      if (domain === "mail.google.com" || domain === "docs.google.com") {
+        return withoutWWW === domain ? domain : null;
+      }
+      return domain;
+    }
+  }
+
+  return REPORT_ALL_DOMAINS ? withoutWWW : null;
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectToHost();
+  }, 5000);
+}
 
 // Connect to native messaging host
 function connectToHost() {
   try {
     port = chrome.runtime.connectNative(NATIVE_HOST);
 
-    port.onMessage.addListener((msg) => {
-      // Future: host could send commands back (e.g., "inject shortcut hint")
-      console.log("[Shorty] Message from host:", msg);
-    });
+    port.onMessage.addListener(() => {});
 
     port.onDisconnect.addListener(() => {
-      console.log("[Shorty] Disconnected from host:", chrome.runtime.lastError?.message);
       port = null;
-      // Retry after a delay
-      setTimeout(connectToHost, 5000);
+      scheduleReconnect();
     });
 
     sendActiveTabDomain();
   } catch (e) {
-    console.error("[Shorty] Failed to connect:", e);
-    setTimeout(connectToHost, 5000);
+    scheduleReconnect();
   }
 }
 
 // Send the current domain to the native host
 function sendDomain(domain) {
-  if (port) {
-    port.postMessage({
-      type: "domain_changed",
-      domain: domain,
-    });
-  }
+  if (!port || !domain || domain === lastSentDomain) return;
+  lastSentDomain = domain;
+  port.postMessage({
+    type: "domain_changed",
+    domain: domain,
+  });
 }
 
 function sendDomainFromUrl(url) {
   const domain = extractDomain(url);
-  if (domain) sendDomain(domain);
+  const supportedDomain = domain ? normalizeSupportedDomain(domain) : null;
+  if (supportedDomain) sendDomain(supportedDomain);
 }
 
 async function sendActiveTabDomain() {

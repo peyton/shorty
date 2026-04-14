@@ -26,4 +26,20 @@ Shorty is a macOS menu-bar app. It provides a small status-bar popover, a settin
 
 ## Permissions
 
-Shorty installs a keyboard event tap, so macOS must grant Accessibility permission before remapping works. The status-bar popover surfaces the permission state and opens the relevant system prompt when permission is missing.
+Shorty installs a keyboard event tap and reads app menus, so macOS must grant Accessibility permission before remapping works. The status-bar popover surfaces the permission state, opens the relevant System Settings pane, and retries permission and tap installation when the user chooses Check Again.
+
+## Release Packaging
+
+From the repo root:
+
+```sh
+just app-package VERSION=1.0.0
+```
+
+The command builds the Release app, signs it with `SHORTY_CODESIGN_IDENTITY` when provided or ad-hoc signing for local validation, and writes `shorty-1.0.0-macos.zip` plus `shorty-1.0.0-macos.zip.sha256` under `.build/releases/`.
+
+Optional notarization uses explicit environment variables only:
+
+```sh
+NOTARYTOOL_PROFILE=<profile> just app-notarize VERSION=1.0.0
+```

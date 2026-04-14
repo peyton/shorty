@@ -2,9 +2,27 @@ import Foundation
 
 /// Converts browser-reported hosts into stable web adapter identifiers.
 public enum DomainNormalizer {
+    public static let supportedWebAppDomains: Set<String> = [
+        "notion.so",
+        "slack.com",
+        "mail.google.com",
+        "docs.google.com",
+        "figma.com",
+        "linear.app"
+    ]
+
     /// Return the adapter identifier used by `AdapterRegistry`.
     public static func adapterIdentifier(for host: String) -> String {
         "web:\(normalizedDomain(for: host))"
+    }
+
+    public static func supportedNormalizedDomain(for host: String) -> String? {
+        let normalized = normalizedDomain(for: host)
+        return supportedWebAppDomains.contains(normalized) ? normalized : nil
+    }
+
+    public static func isSupportedWebAppDomain(_ host: String) -> Bool {
+        supportedNormalizedDomain(for: host) != nil
     }
 
     /// Collapse known subdomains to the supported web app domain.

@@ -4,6 +4,8 @@ name: CI
 on:
   push:
     branches: [master]
+    tags:
+      - "v*"
   pull_request:
     branches: [master]
 
@@ -35,7 +37,8 @@ jobs:
         if: ${{ !env.ACT }}
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
-          cache: true
+          cache: false
+          cache_save: false
       - name: Run lint shard
         run: mise exec -- just ci-lint
 
@@ -60,7 +63,8 @@ jobs:
         if: ${{ !env.ACT }}
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
-          cache: true
+          cache: false
+          cache_save: false
       - name: Run Python shard
         run: mise exec -- just ci-python
 
@@ -72,7 +76,7 @@ jobs:
       - if: ${{ !env.ACT }}
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
-          xcode-version: latest
+          xcode-version: latest-stable
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
@@ -89,7 +93,8 @@ jobs:
         if: ${{ !env.ACT }}
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
-          cache: true
+          cache: false
+          cache_save: false
       - name: Generate project
         run: mise exec -- just generate
       - name: Run app tests
@@ -103,7 +108,7 @@ jobs:
       - if: ${{ !env.ACT }}
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
-          xcode-version: latest
+          xcode-version: latest-stable
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
@@ -120,8 +125,41 @@ jobs:
         if: ${{ !env.ACT }}
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
         with:
-          cache: true
+          cache: false
+          cache_save: false
       - name: Generate project
         run: mise exec -- just generate
       - name: Run app build shard
         run: mise exec -- just ci-build
+
+  release-package:
+    name: Release Package
+    runs-on: macos-latest
+    needs: [app-test, app-build]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - if: ${{ !env.ACT }}
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - name: Install tools
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          cache: false
+          cache_save: false
+      - name: Package app artifact
+        env:
+          SHORTY_CODESIGN_IDENTITY: "-"
+          SHORTY_ALLOW_AD_HOC_RELEASE: "1"
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mise exec -- just app-package VERSION="$version"
+      - name: Upload app package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shorty-${{ github.ref_name }}-macos
+          path: .build/releases/*
+          if-no-files-found: error

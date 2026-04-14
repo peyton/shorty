@@ -1,3 +1,5 @@
+import Darwin
+import Foundation
 import XCTest
 @testable import ShortyCore
 
@@ -259,6 +261,31 @@ final class KeyComboTests: XCTestCase {
         )
     }
 
+    func testBrowserBridgeRejectsUnsupportedDomainByDefault() {
+        let payload = Data(#"{"type":"domain_changed","domain":"example.com"}"#.utf8)
+        XCTAssertNil(BrowserBridge.decodeMessagePayload(payload))
+        XCTAssertEqual(
+            BrowserBridge.decodeMessagePayload(payload, reportAllDomains: true),
+            .domainChanged("example.com")
+        )
+    }
+
+    func testBrowserBridgeReadWriteHelpersRoundTripPipe() {
+        var descriptors = [Int32](repeating: 0, count: 2)
+        XCTAssertEqual(pipe(&descriptors), 0)
+        defer {
+            close(descriptors[0])
+            close(descriptors[1])
+        }
+
+        let payload = Data("shorty".utf8)
+        XCTAssertTrue(BrowserBridge.writeAll(payload, to: descriptors[1]))
+        XCTAssertEqual(
+            BrowserBridge.readExactly(from: descriptors[0], count: payload.count),
+            payload
+        )
+    }
+
     // MARK: - Web adapters
 
     func testRegistryIncludesWebAdapters() {
@@ -269,5 +296,72 @@ final class KeyComboTests: XCTestCase {
         XCTAssertTrue(ids.contains("web:docs.google.com"))
         XCTAssertTrue(ids.contains("web:figma.com"))
         XCTAssertTrue(ids.contains("web:linear.app"))
+    }
+
+    func testRegistryUsesIndexedResolution() {
+        let registry = AdapterRegistry(appSupportDirectory: temporaryDirectory())
+        let commandPalette = CanonicalShortcut.defaults.first {
+            $0.id == "command_palette"
+        }!
+
+        XCTAssertEqual(
+            registry.resolve(
+                combo: commandPalette.defaultKeys,
+                forApp: "com.microsoft.VSCode"
+            ),
+            .remap(KeyCombo(keyCode: 0x23, modifiers: [.command, .shift]))
+        )
+    }
+
+    func testAdapterValidationRejectsUnknownCanonicalID() {
+        let adapter = Adapter(
+            appIdentifier: "com.test.invalid",
+            appName: "Invalid",
+            mappings: [
+                Adapter.Mapping(canonicalID: "missing", method: .passthrough)
+            ]
+        )
+
+        XCTAssertThrowsError(try AdapterRegistry.validate(adapter: adapter)) { error in
+            XCTAssertEqual(
+                error as? AdapterValidationError,
+                .unknownCanonicalID("missing")
+            )
+        }
+    }
+
+    func testEventTapEnabledStatePersists() {
+        let suiteName = "ShortyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let registry = AdapterRegistry(appSupportDirectory: temporaryDirectory())
+        let appMonitor = AppMonitor()
+        let firstManager = EventTapManager(
+            registry: registry,
+            appMonitor: appMonitor,
+            userDefaults: defaults
+        )
+        XCTAssertTrue(firstManager.isEnabled)
+
+        firstManager.isEnabled = false
+        let secondManager = EventTapManager(
+            registry: registry,
+            appMonitor: appMonitor,
+            userDefaults: defaults
+        )
+
+        XCTAssertFalse(secondManager.isEnabled)
+    }
+
+    func testReleaseConfigurationDisablesAutoAdapterGenerationByDefault() {
+        XCTAssertFalse(EngineConfiguration.releaseDefault.autoGenerateMenuAdapters)
+        XCTAssertFalse(EngineConfiguration.releaseDefault.reportAllBrowserDomains)
+    }
+
+    private func temporaryDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("ShortyTests-\(UUID().uuidString)", isDirectory: true)
     }
 }

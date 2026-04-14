@@ -6,7 +6,7 @@
     <title>Shorty for macOS</title>
     <meta
       name="description"
-      content="Shorty is a small macOS app that helps you find and use keyboard shortcuts from the menu bar."
+      content="Download Shorty for macOS, verify the release checksum, and set up local keyboard shortcut remapping."
     />
     <link rel="stylesheet" href="/assets/site.css" />
     <link rel="icon" href="/assets/app-icon.svg" type="image/svg+xml" />
@@ -29,17 +29,23 @@
         <section class="hero" aria-labelledby="hero-title">
           <div>
             <p class="eyebrow">macOS menu bar shortcuts</p>
-            <h1 id="hero-title">Find the shortcut you meant to press.</h1>
+            <h1 id="hero-title">One shortcut set across your Mac.</h1>
             <p class="lede">
-              Shorty watches the front app, reads its menus, and keeps useful
-              keyboard commands close without taking over your workspace.
+              Shorty runs in the menu bar, watches the front app, and remaps a
+              small trusted set of shortcuts locally.
             </p>
             <div class="actions">
-              <a class="button" href="https://github.com/peyton/shorty"
-                >Build from source</a
+              <a
+                class="button"
+                href="https://github.com/peyton/shorty/releases/latest"
+                >Download for macOS</a
               >
-              <a class="button secondary" href="/support/">Get support</a>
+              <a class="button secondary" href="/support/">Setup help</a>
             </div>
+            <p class="download-note">
+              Releases include <code>shorty-&lt;version&gt;-macos.zip</code> and
+              a matching <code>.sha256</code> checksum file.
+            </p>
           </div>
           <div class="hero-art" aria-hidden="true">
             <img
@@ -54,34 +60,37 @@
 
         <section class="section alt" aria-labelledby="flow-title">
           <div class="section-inner">
-            <h2 id="flow-title">A quiet way back to the keyboard.</h2>
+            <h2 id="flow-title">A direct download with a visible checksum.</h2>
             <p class="section-copy">
-              Search actions by name, confirm the shortcut, and keep your hands
-              moving. Shorty stays small so the app you are using remains the
-              focus.
+              Download the archive from the latest release, compare the SHA-256
+              line, then drag Shorty to Applications.
             </p>
-            <div class="steps">
+            <div class="steps release-steps">
               <article class="step">
-                <strong>Read the active menus</strong>
+                <strong>Download</strong>
                 <p>
-                  Shorty uses macOS accessibility access to inspect menu items
-                  in the app you are already using.
+                  Use the latest GitHub release asset named
+                  <code>shorty-&lt;version&gt;-macos.zip</code>.
                 </p>
               </article>
               <article class="step">
-                <strong>Match the command</strong>
+                <strong>Verify</strong>
                 <p>
-                  Type part of an action name and Shorty narrows the menu tree
-                  to likely matches.
+                  Open the matching <code>.sha256</code> file and compare it
+                  with the archive before opening the app.
                 </p>
               </article>
               <article class="step">
-                <strong>Press with confidence</strong>
+                <strong>Allow</strong>
                 <p>
-                  See the key combo before you leave the menu bar or use it as a
-                  quick reminder.
+                  Grant Accessibility access when macOS asks so Shorty can read
+                  menus and install its keyboard event tap.
                 </p>
               </article>
+            </div>
+            <div class="checksum-box" aria-label="Checksum command">
+              <span>Checksum command</span>
+              <code>shasum -a 256 shorty-&lt;version&gt;-macos.zip</code>
             </div>
           </div>
         </section>
@@ -90,24 +99,31 @@
           <div class="section-inner split">
             <div>
               <h2 id="shortcuts-title">
-                Built for the shortcuts already there.
+                Native first. Browser bridge optional.
               </h2>
               <p class="section-copy">
-                Shorty does not ask apps to change. It works with standard macOS
-                menus and the keyboard shortcuts apps publish there.
+                Shorty works without cloud services. Browser support is an
+                explicit install for supported Chrome-family browsers.
               </p>
+              <ul class="plain-list">
+                <li>Bundled native adapters load automatically.</li>
+                <li>Generated adapters require review before saving.</li>
+                <li>
+                  Browser domains are limited to supported web apps by default.
+                </li>
+              </ul>
             </div>
             <div class="shortcut-stack" aria-label="Example shortcut list">
               <div class="shortcut-row">
-                <span>Open Recent</span>
-                <span class="key">Shift Command O</span>
+                <span>Command palette</span>
+                <span class="key">Shift Command P</span>
               </div>
               <div class="shortcut-row">
-                <span>Show Inspector</span>
-                <span class="key">Option Command I</span>
+                <span>Search everywhere</span>
+                <span class="key">Command K</span>
               </div>
               <div class="shortcut-row">
-                <span>Close Tab</span>
+                <span>Close current tab</span>
                 <span class="key">Command W</span>
               </div>
             </div>
@@ -116,11 +132,13 @@
 
         <section class="section alt" aria-labelledby="contact-title">
           <div class="section-inner">
-            <h2 id="contact-title">Need help?</h2>
+            <h2 id="contact-title">Support paths are short.</h2>
             <p class="section-copy">
-              Email <a href="mailto:shorty@peyton.app">shorty@peyton.app</a>
-              with the macOS version, app name, and the shortcut you expected to
-              find.
+              Start with the
+              <a href="/support/">Accessibility and bridge checks</a>. Email
+              <a href="mailto:shorty@peyton.app">shorty@peyton.app</a> with the
+              macOS version, app name, and shortcut if the behavior still looks
+              wrong.
             </p>
           </div>
         </section>

@@ -6,7 +6,7 @@
     <title>Shorty Privacy</title>
     <meta
       name="description"
-      content="Shorty privacy notes for menu inspection, local processing, and support contact."
+      content="Shorty privacy notes for local shortcut processing, Accessibility access, optional browser bridge data, and support email."
     />
     <link rel="stylesheet" href="/assets/site.css" />
     <link rel="icon" href="/assets/app-icon.svg" type="image/svg+xml" />
@@ -28,7 +28,7 @@
       <p class="eyebrow">Privacy</p>
       <h1>Shorty privacy</h1>
       <p class="lede">
-        Shorty is designed for local shortcut lookup. Questions can be sent to
+        Shorty is a local-first shortcut tool. Questions can be sent to
         <a href="mailto:shorty@peyton.app">shorty@peyton.app</a>.
       </p>
 
@@ -36,15 +36,36 @@
         <h2 id="local-title">Local processing</h2>
         <p>
           Shorty reads menu item names and keyboard shortcut metadata exposed by
-          the active macOS app. The lookup work happens on the Mac.
+          the active macOS app. Shortcut matching and event handling happen on
+          the Mac.
         </p>
       </section>
 
       <section aria-labelledby="access-title">
         <h2 id="access-title">Accessibility access</h2>
         <p>
-          macOS accessibility permission is used to inspect application menus.
-          You can remove that access in System Settings at any time.
+          macOS Accessibility permission is used to inspect application menus
+          and install the keyboard event tap. You can remove that access in
+          System Settings at any time.
+        </p>
+      </section>
+
+      <section aria-labelledby="bridge-title">
+        <h2 id="bridge-title">Browser bridge</h2>
+        <p>
+          The browser bridge is optional. By default, the extension reports only
+          supported web-app domains such as Notion, Slack, Gmail, Google Docs,
+          Figma, and Linear. All-domain reporting is an advanced diagnostic mode
+          and is off by default.
+        </p>
+      </section>
+
+      <section aria-labelledby="storage-title">
+        <h2 id="storage-title">Local storage</h2>
+        <p>
+          Shorty stores reviewed adapters and bridge socket state under the
+          user's Application Support directory. It does not require a cloud
+          account or external service.
         </p>
       </section>
 

@@ -16,6 +16,8 @@ Useful docs:
 
 - [Keyboard unifier strategies](docs/keyboard-unifier-strategies.md)
 - [Strategy 5 local features ExecPlan](docs/strategy5-local-features-execplan.md)
+- [Release hardening ExecPlan](docs/release-hardening-execplan.md)
+- [Troubleshooting](docs/troubleshooting.md)
 - [App workspace notes](app/README.md)
 
 ## Requirements
@@ -39,11 +41,11 @@ Run the app:
 just run
 ```
 
-Shorty needs Accessibility permission before it can install the keyboard event tap. Open the menu bar item and use the Accessibility button, or grant the built app permission in System Settings > Privacy & Security > Accessibility.
+Shorty needs Accessibility permission before it can read app menus and install the keyboard event tap. Open the menu bar item and use Open Accessibility Settings, grant Shorty access, then choose Check Again in the popover.
 
 ## Browser Bridge
 
-The optional Chrome bridge lets Shorty use web-app adapters while Chrome-family browsers are frontmost. The bridge path has three parts:
+The optional browser bridge lets Shorty use web-app adapters while supported Chrome-family browsers are frontmost. Native app shortcut remapping does not require it. The bridge path has three parts:
 
 - bundled extension resources in `app/Shorty/Sources/ShortyCore/Resources/BrowserExtension/`
 - the `ShortyBridge` command-line target, which proxies Chrome Native Messaging stdin/stdout to Shorty's Unix socket
@@ -54,13 +56,21 @@ Local install flow:
 1. Build and run Shorty.
 2. In Chrome, load the browser extension directory as an unpacked extension.
 3. Copy the extension ID.
-4. Install the native messaging manifest:
+4. Install the native messaging manifest for one or more browsers:
 
 ```sh
-just install-browser-bridge EXTENSION_ID=<chrome-extension-id>
+just install-browser-bridge EXTENSION_ID=<chrome-extension-id> BROWSERS=chrome,brave,edge
 ```
 
-The install command builds `ShortyBridge`, copies it to `.build/browser-bridge/shorty-bridge`, and writes Chrome's native messaging manifest under `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`.
+The install command validates the extension ID, builds `ShortyBridge`, copies it to `.build/browser-bridge/shorty-bridge`, and writes native messaging manifests under the selected browser Application Support directories.
+
+Supported browser targets are `chrome`, `chrome-canary`, `chromium`, `brave`, `edge`, and `vivaldi`. Use `BROWSERS=all` for every supported manifest directory.
+
+Uninstall manifests:
+
+```sh
+just uninstall-browser-bridge BROWSERS=all
+```
 
 Supported normalized web adapter IDs:
 
@@ -79,7 +89,15 @@ App:
 - `just build` - build the app.
 - `just run` - build and launch the app.
 - `just test-app` - run Swift tests.
-- `just install-browser-bridge EXTENSION_ID=<id>` - build and install the Chrome native messaging host manifest.
+- `just install-browser-bridge EXTENSION_ID=<id> BROWSERS=chrome` - build and install browser native messaging manifests.
+- `just uninstall-browser-bridge BROWSERS=chrome` - remove browser native messaging manifests.
+
+Release:
+
+- `just release-preflight VERSION=1.0.0` - verify a clean public release state.
+- `just app-package VERSION=1.0.0` - build, sign, zip, and checksum the app under `.build/releases/`.
+- `just app-notarize VERSION=1.0.0` - submit the app archive to Apple notarization, staple the app, and repackage it.
+- `just release VERSION=1.0.0` - run app packaging and release preflight.
 
 Web:
 
@@ -100,20 +118,18 @@ Repository:
 
 ## Architecture
 
-`ShortcutEngine` owns the app monitor, adapter registry, event tap, menu introspector, and browser bridge. The app starts the engine when the menu bar item is created.
+`ShortcutEngine` owns the app monitor, adapter registry, event tap, menu introspector, and browser bridge. The app starts the engine from the app lifecycle so startup remains independent of menu bar label rendering.
 
 `AppMonitor` publishes the active native bundle ID and optional web domain. Browser domains are normalized before adapter lookup, so subdomains like `workspace.slack.com` resolve to `web:slack.com`.
 
-`AdapterRegistry` loads built-in adapters first, then auto-generated menu-introspection adapters from `~/Library/Application Support/Shorty/AutoAdapters/`, then user adapters from `~/Library/Application Support/Shorty/Adapters/`.
+`AdapterRegistry` loads built-in adapters first, then reviewed user adapters from `~/Library/Application Support/Shorty/Adapters/`. Adapter loading and saving run through validation and rebuild an indexed shortcut resolver for fast effective-app lookups.
 
 `IntentMatcher` is intentionally conservative for auto adapters. It accepts exact aliases, exact key combos, or scores at least `0.70`, and rejects close competing matches with a margin below `0.20`.
 
 `EventTapManager` intercepts canonical keyDown events and either remaps the event, invokes a menu item through Accessibility, performs an AX action, or passes the event through unchanged.
 
-## Roadmap
+## Release Notes
 
-- Package the browser extension for easier local installation.
-- Add adapter editing and export/import from Settings.
-- Broaden menu-introspection coverage with richer context checks.
-- Add more web-app adapters after validating shortcuts against the live apps.
-- Keep cloud, marketplace, and LLM-generated adapters out of the default local flow until they have a clear trust and review model.
+Direct-download app archives are created under `.build/releases/` as `shorty-<version>-macos.zip` with a matching `.sha256` file. Notarization is optional and only runs when explicit Apple notarization credentials are supplied.
+
+Generated menu-introspection adapters are disabled by default for public release. Users can generate, preview, and save an adapter explicitly from Settings.

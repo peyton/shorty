@@ -1,75 +1,172 @@
 import AppKit
 import Combine
 
-/// Top-level orchestrator that wires together the app monitor, adapter
-/// registry, event tap, and (in Phase 2) menu introspector.
-///
-/// The engine is the single entry point for the rest of the app.
-/// Create one at launch, call `start()`, and it handles everything.
-///
-/// ## Ownership graph
-///
-/// ```
-/// ShortcutEngine
-///   ├─ AppMonitor          (observes frontmost app)
-///   ├─ AdapterRegistry     (resolves shortcuts → native actions)
-///   ├─ EventTapManager     (intercepts and rewrites keyboard events)
-///   ├─ MenuIntrospector?   (Phase 2: reads menus via AX)
-///   └─ BrowserBridge?      (Phase 3: native messaging host)
-/// ```
+/// Top-level orchestrator for monitoring the active app, resolving adapters,
+/// installing the keyboard event tap, and running the optional browser bridge.
 public final class ShortcutEngine: ObservableObject {
 
-    // MARK: - Sub-components (public for UI binding)
+    // MARK: - Sub-components
 
     public let appMonitor: AppMonitor
     public let registry: AdapterRegistry
     public let eventTap: EventTapManager
+    public let configuration: EngineConfiguration
 
-    /// Phase 2: menu introspector for auto-generating adapters.
     public var menuIntrospector: MenuIntrospector?
-
-    /// Phase 3: browser extension bridge.
     public var browserBridge: BrowserBridge?
 
     // MARK: - Published state
 
-    /// `true` once the event tap is running.
     @Published public private(set) var isRunning: Bool = false
+    @Published public private(set) var status: EngineStatus = .stopped
+    @Published public private(set) var permissionState: PermissionState = .unknown
+    @Published public private(set) var generatedAdapterPreview: Adapter?
+    @Published public private(set) var adapterGenerationMessage: String?
 
-    /// Last error message, if any (e.g., missing Accessibility permission).
+    /// Last error message kept for older UI callsites.
     @Published public var lastError: String?
 
-    // MARK: - Combine
+    // MARK: - Private state
 
     private var cancellables = Set<AnyCancellable>()
+    private var appChangeObserverInstalled = false
+    private var adapterGenerationInFlight = Set<String>()
 
     // MARK: - Init
 
-    public init() {
+    public init(
+        configuration: EngineConfiguration = .releaseDefault,
+        userDefaults: UserDefaults = .standard
+    ) {
+        self.configuration = configuration
         self.appMonitor = AppMonitor()
         self.registry = AdapterRegistry()
-        self.eventTap = EventTapManager(registry: registry,
-                                        appMonitor: appMonitor)
+        self.eventTap = EventTapManager(
+            registry: registry,
+            appMonitor: appMonitor,
+            userDefaults: userDefaults
+        )
         self.menuIntrospector = MenuIntrospector()
-        self.browserBridge = BrowserBridge(appMonitor: appMonitor)
+        self.browserBridge = BrowserBridge(
+            appMonitor: appMonitor,
+            configuration: configuration
+        )
+
+        eventTap.$isEnabled
+            .removeDuplicates()
+            .sink { [weak self] isEnabled in
+                guard let self, self.isRunning else { return }
+                self.setStatus(isEnabled ? .running : .disabled)
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Lifecycle
 
-    /// Start the engine. Call once at launch.
     public func start() {
-        guard !isRunning else { return }
-
-        // 1. Start the event tap.
-        let tapOK = eventTap.start()
-        if !tapOK {
-            lastError = "Could not install keyboard tap. "
-                + "Please grant Accessibility permission in "
-                + "System Settings → Privacy & Security → Accessibility."
+        guard status != .starting else { return }
+        guard !isRunning else {
+            setStatus(eventTap.isEnabled ? .running : .disabled)
+            return
         }
-        isRunning = tapOK
 
-        // 2. Observe frontmost app changes for Phase 2 auto-adapter generation.
+        setStatus(.starting)
+        installAppChangeObserverIfNeeded()
+        browserBridge?.start()
+        refreshPermissionState()
+
+        guard permissionState.isGranted else {
+            setStatus(.permissionRequired)
+            return
+        }
+
+        let tapOK = eventTap.start()
+        guard tapOK else {
+            setStatus(.failed(
+                "Could not install the keyboard tap. Check Accessibility permission and try again."
+            ))
+            return
+        }
+
+        isRunning = true
+        setStatus(eventTap.isEnabled ? .running : .disabled)
+    }
+
+    public func stop() {
+        eventTap.stop()
+        browserBridge?.stop()
+        adapterGenerationInFlight.removeAll()
+        generatedAdapterPreview = nil
+        adapterGenerationMessage = nil
+        isRunning = false
+        setStatus(.stopped)
+    }
+
+    public func checkAccessibilityAndRetry() {
+        refreshPermissionState()
+        guard permissionState.isGranted else {
+            setStatus(.permissionRequired)
+            return
+        }
+
+        if !isRunning {
+            start()
+            return
+        }
+
+        setStatus(eventTap.isEnabled ? .running : .disabled)
+    }
+
+    public func refreshPermissionState() {
+        permissionState = Self.hasAccessibilityPermission ? .granted : .notGranted
+    }
+
+    // MARK: - Adapter generation
+
+    public func generateAdapterForCurrentApp() {
+        guard let bundleID = appMonitor.currentBundleID else {
+            adapterGenerationMessage = "No active app is available."
+            return
+        }
+
+        if registry.hasAdapter(for: bundleID) {
+            adapterGenerationMessage = "Shorty already has an adapter for this app."
+            return
+        }
+
+        generateAdapterPreview(
+            bundleID: bundleID,
+            appName: appMonitor.currentAppName ?? bundleID,
+            pid: appMonitor.currentPID,
+            saveAutomatically: false
+        )
+    }
+
+    public func saveGeneratedAdapterPreview() {
+        guard let adapter = generatedAdapterPreview else {
+            adapterGenerationMessage = "No generated adapter is waiting to save."
+            return
+        }
+
+        do {
+            try registry.saveAutoAdapter(adapter)
+            generatedAdapterPreview = nil
+            adapterGenerationMessage = "Saved adapter for \(adapter.appName)."
+        } catch {
+            adapterGenerationMessage = "Could not save generated adapter: \(error)"
+            ShortyLog.engine.error("Failed to save generated adapter: \(error.localizedDescription)")
+        }
+    }
+
+    public func discardGeneratedAdapterPreview() {
+        generatedAdapterPreview = nil
+        adapterGenerationMessage = nil
+    }
+
+    private func installAppChangeObserverIfNeeded() {
+        guard !appChangeObserverInstalled else { return }
+        appChangeObserverInstalled = true
+
         appMonitor.$currentBundleID
             .removeDuplicates()
             .compactMap { $0 }
@@ -77,53 +174,102 @@ public final class ShortcutEngine: ObservableObject {
                 self?.onAppChanged(bundleID: bundleID)
             }
             .store(in: &cancellables)
-
-        // 3. Phase 3: start browser bridge if available.
-        browserBridge?.start()
     }
-
-    /// Stop the engine and clean up.
-    public func stop() {
-        eventTap.stop()
-        browserBridge?.stop()
-        cancellables.removeAll()
-        isRunning = false
-    }
-
-    // MARK: - App change handler
 
     private func onAppChanged(bundleID: String) {
-        // If we already have an adapter (any source), nothing to do.
-        if registry.hasAdapter(for: bundleID) {
+        guard configuration.autoGenerateMenuAdapters else { return }
+        guard !registry.hasAdapter(for: bundleID) else { return }
+
+        generateAdapterPreview(
+            bundleID: bundleID,
+            appName: appMonitor.currentAppName ?? bundleID,
+            pid: appMonitor.currentPID,
+            saveAutomatically: true
+        )
+    }
+
+    private func generateAdapterPreview(
+        bundleID: String,
+        appName: String,
+        pid: pid_t,
+        saveAutomatically: Bool
+    ) {
+        guard let introspector = menuIntrospector else {
+            adapterGenerationMessage = "Menu adapter generation is unavailable."
+            return
+        }
+        guard adapterGenerationInFlight.insert(bundleID).inserted else {
+            adapterGenerationMessage = "Already checking \(appName)."
             return
         }
 
-        // Phase 2: try to auto-generate an adapter via menu introspection.
-        guard let introspector = menuIntrospector else { return }
+        generatedAdapterPreview = nil
+        adapterGenerationMessage = "Reading menus for \(appName)..."
 
-        let pid = appMonitor.currentPID
-        let appName = appMonitor.currentAppName ?? bundleID
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard self.adapterGenerationInFlight.remove(bundleID) != nil else { return }
+            self.adapterGenerationMessage = "Timed out while reading menus for \(appName)."
+        }
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + configuration.adapterGenerationTimeout,
+            execute: timeout
+        )
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            guard let adapter = introspector.generateAdapter(
+            guard let self else { return }
+            let adapter = introspector.generateAdapter(
                 bundleID: bundleID,
                 appName: appName,
                 pid: pid,
                 canonicals: CanonicalShortcut.defaults
-            ) else { return }
+            )
 
             DispatchQueue.main.async {
-                // Save to disk (best-effort) and reload the in-memory registry.
-                try? self.registry.saveAutoAdapter(adapter)
-                self.registry.reloadAdapters()
+                timeout.cancel()
+                guard self.adapterGenerationInFlight.remove(bundleID) != nil else { return }
+                guard self.appMonitor.currentBundleID == bundleID else {
+                    self.adapterGenerationMessage = "Skipped generated adapter because the active app changed."
+                    return
+                }
+
+                guard let adapter else {
+                    self.adapterGenerationMessage = "No matching shortcuts were found in \(appName)."
+                    return
+                }
+
+                if saveAutomatically {
+                    do {
+                        try self.registry.saveAutoAdapter(adapter)
+                        self.adapterGenerationMessage = "Saved adapter for \(adapter.appName)."
+                    } catch {
+                        self.adapterGenerationMessage = "Could not save generated adapter: \(error)"
+                    }
+                } else {
+                    self.generatedAdapterPreview = adapter
+                    self.adapterGenerationMessage = "Generated \(adapter.mappings.count) mappings for \(adapter.appName). Review before saving."
+                }
             }
+        }
+    }
+
+    // MARK: - Status
+
+    private func setStatus(_ newStatus: EngineStatus) {
+        status = newStatus
+        switch newStatus {
+        case .failed(let message):
+            lastError = message
+        case .permissionRequired:
+            lastError = nil
+        case .stopped, .starting, .running, .disabled:
+            lastError = nil
         }
     }
 
     // MARK: - Convenience
 
-    /// Check whether the process has Accessibility permission.
     public static var hasAccessibilityPermission: Bool {
         let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         return AXIsProcessTrustedWithOptions(
@@ -131,7 +277,6 @@ public final class ShortcutEngine: ObservableObject {
         )
     }
 
-    /// Prompt the user to grant Accessibility permission.
     public static func requestAccessibilityPermission() {
         let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         AXIsProcessTrustedWithOptions(

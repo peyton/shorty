@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+import plistlib
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from scripts.tooling.browser_manifest import (
+    HOST_NAME,
+    BrowserManifestError,
+    install_manifests,
+    manifest_payload,
+    normalize_browser_names,
+    uninstall_manifests,
+    validate_extension_id,
+)
+from scripts.tooling.package_app import (
+    AppPackageError,
+    package_app,
+    sha256_file,
+)
+from scripts.tooling.release_preflight import (
+    ReleasePreflightError,
+    check_signing_identity,
+    check_xcode_is_stable,
+)
+
+
+def make_fake_app(root: Path, version: str = "1.0.0") -> Path:
+    app = root / "Shorty.app"
+    contents = app / "Contents"
+    macos = contents / "MacOS"
+    macos.mkdir(parents=True)
+    (macos / "Shorty").write_text("#!/bin/sh\n", encoding="utf-8")
+    (contents / "Info.plist").write_bytes(
+        plistlib.dumps(
+            {
+                "CFBundleExecutable": "Shorty",
+                "CFBundleIdentifier": "app.peyton.shorty",
+                "CFBundleShortVersionString": version,
+                "CFBundleVersion": "1",
+            }
+        )
+    )
+    return app
+
+
+def test_app_package_creates_deterministic_zip_and_checksum(tmp_path: Path) -> None:
+    app = make_fake_app(tmp_path)
+    output_dir = tmp_path / "releases"
+
+    first = package_app(app, "1.0.0", output_dir)
+    second = package_app(app, "1.0.0", output_dir)
+
+    assert first.archive_path == output_dir / "shorty-1.0.0-macos.zip"
+    assert first.checksum_path == output_dir / "shorty-1.0.0-macos.zip.sha256"
+    assert first.digest == second.digest == sha256_file(first.archive_path)
+    assert (
+        first.checksum_path.read_text(encoding="utf-8")
+        == f"{first.digest}  shorty-1.0.0-macos.zip\n"
+    )
+
+    with zipfile.ZipFile(first.archive_path) as archive:
+        assert "Shorty.app/" in archive.namelist()
+        assert "Shorty.app/Contents/Info.plist" in archive.namelist()
+
+
+def test_app_package_rejects_version_mismatch(tmp_path: Path) -> None:
+    app = make_fake_app(tmp_path, version="1.0.0")
+
+    with pytest.raises(AppPackageError, match="does not match app bundle"):
+        package_app(app, "2.0.0", tmp_path / "releases")
+
+
+def test_app_package_preserves_symlink_metadata(tmp_path: Path) -> None:
+    app = make_fake_app(tmp_path)
+    framework = app / "Contents" / "Frameworks" / "Example.framework"
+    version = framework / "Versions" / "A"
+    version.mkdir(parents=True)
+    (version / "Resources").mkdir()
+    (version / "Example").write_text("binary", encoding="utf-8")
+    (framework / "Example").symlink_to("Versions/A/Example")
+    (framework / "Resources").symlink_to("Versions/Current/Resources")
+    (framework / "Versions" / "Current").symlink_to("A")
+
+    result = package_app(app, "1.0.0", tmp_path / "releases")
+
+    with zipfile.ZipFile(result.archive_path) as archive:
+        assert_zip_entry_is_symlink(
+            archive,
+            "Shorty.app/Contents/Frameworks/Example.framework/Example",
+            "Versions/A/Example",
+        )
+        assert_zip_entry_is_symlink(
+            archive,
+            "Shorty.app/Contents/Frameworks/Example.framework/Resources",
+            "Versions/Current/Resources",
+        )
+        assert_zip_entry_is_symlink(
+            archive,
+            "Shorty.app/Contents/Frameworks/Example.framework/Versions/Current",
+            "A",
+        )
+
+
+def assert_zip_entry_is_symlink(
+    archive: zipfile.ZipFile,
+    name: str,
+    target: str,
+) -> None:
+    info = archive.getinfo(name)
+    file_type = (info.external_attr >> 16) & 0o170000
+    assert info.create_system == 3
+    assert file_type == 0o120000
+    assert archive.read(info).decode("utf-8") == target
+
+
+def test_release_preflight_rejects_beta_xcode_without_override() -> None:
+    with pytest.raises(ReleasePreflightError, match="stable Xcode"):
+        check_xcode_is_stable("Xcode 26.5\nBuild version 17F5012f Beta", False)
+
+    check_xcode_is_stable("Xcode 26.5\nBuild version 17F5012f Beta", True)
+
+
+def test_release_preflight_requires_real_signing_identity() -> None:
+    with pytest.raises(ReleasePreflightError, match="SHORTY_CODESIGN_IDENTITY"):
+        check_signing_identity({})
+
+    check_signing_identity(
+        {"SHORTY_CODESIGN_IDENTITY": "Developer ID Application: Test"}
+    )
+    check_signing_identity(
+        {
+            "SHORTY_CODESIGN_IDENTITY": "-",
+            "SHORTY_ALLOW_AD_HOC_RELEASE": "1",
+        }
+    )
+
+
+def test_browser_manifest_validates_extension_id() -> None:
+    valid = "abcdefghijklmnopabcdefghijklmnop"
+    assert validate_extension_id(valid.upper()) == valid
+
+    with pytest.raises(BrowserManifestError, match="extension ID"):
+        validate_extension_id("not-a-real-extension")
+
+
+def test_browser_manifest_installs_and_uninstalls_multiple_browsers(
+    tmp_path: Path,
+) -> None:
+    extension_id = "abcdefghijklmnopabcdefghijklmnop"
+    bridge_path = tmp_path / "shorty-bridge"
+    bridge_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    browsers = normalize_browser_names("chrome,brave,edge")
+
+    installed = install_manifests(extension_id, bridge_path, tmp_path, browsers)
+
+    assert len(installed) == 3
+    for path in installed:
+        data = path.read_text(encoding="utf-8")
+        assert HOST_NAME in data
+        assert f"chrome-extension://{extension_id}/" in data
+
+    removed = uninstall_manifests(tmp_path, browsers)
+    assert sorted(removed) == sorted(installed)
+    assert all(not path.exists() for path in installed)
+
+
+def test_browser_manifest_payload_uses_resolved_bridge_path(tmp_path: Path) -> None:
+    extension_id = "abcdefghijklmnopabcdefghijklmnop"
+    bridge_path = tmp_path / "shorty-bridge"
+    bridge_path.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    payload = manifest_payload(extension_id, bridge_path)
+
+    assert payload["path"] == str(bridge_path.resolve())
+    assert payload["allowed_origins"] == [f"chrome-extension://{extension_id}/"]
