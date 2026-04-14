@@ -73,6 +73,24 @@ let project = Project(
             settings: targetSettings()
         ),
         .target(
+            name: "ShortyScreenshots",
+            destinations: .macOS,
+            product: .commandLineTool,
+            bundleId: "app.peyton.shorty.screenshots",
+            deploymentTargets: defaultDeploymentTarget,
+            infoPlist: .default,
+            sources: [
+                "Sources/ShortyScreenshots/**",
+                "Sources/Shorty/ShortyBrand.swift",
+                "Sources/Shorty/SettingsView.swift",
+                "Sources/Shorty/StatusBarView.swift"
+            ],
+            dependencies: [
+                .target(name: "ShortyCore")
+            ],
+            settings: targetSettings()
+        ),
+        .target(
             name: "ShortyCoreTests",
             destinations: .macOS,
             product: .unitTests,

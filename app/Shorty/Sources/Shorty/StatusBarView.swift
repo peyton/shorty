@@ -4,32 +4,161 @@ import SwiftUI
 
 struct StatusBarView: View {
     @ObservedObject var engine: ShortcutEngine
-    @State private var showsPermissionHelp = false
-    @State private var showsAdvancedDiagnostics = false
 
-    private var adapter: Adapter? {
-        guard let appID = engine.appMonitor.effectiveAppID else {
-            return nil
+    var body: some View {
+        StatusBarContentView(
+            snapshot: .live(engine: engine),
+            eventTapEnabled: eventTapEnabledBinding,
+            actions: .live(engine: engine)
+        )
+    }
+
+    private var eventTapEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.eventTap.isEnabled },
+            set: { engine.eventTap.isEnabled = $0 }
+        )
+    }
+}
+
+struct StatusBarSnapshot {
+    let statusTitle: String
+    let statusDetail: String
+    let statusIsHealthy: Bool
+    let currentAppName: String
+    let coverageText: String
+    let lifecycleMessage: String?
+    let requiresPermission: Bool
+    let effectiveID: String
+    let adapterSource: String
+    let mappingCount: String
+    let webDomain: String
+    let bridgeStatus: String
+    let eventsIntercepted: Int
+    let eventsRemapped: Int
+    let validationMessages: [String]
+
+    static func live(engine: ShortcutEngine) -> StatusBarSnapshot {
+        let appID = engine.appMonitor.effectiveAppID
+        let adapter = appID.flatMap { engine.registry.activeAdapter(for: $0) }
+
+        let coverageText: String
+        if !engine.eventTap.isEnabled {
+            coverageText = "Paused"
+        } else if let adapter {
+            coverageText = "\(adapter.mappings.count) shortcuts for \(adapter.appName)"
+        } else {
+            coverageText = "Pass through"
         }
-        return engine.registry.activeAdapter(for: appID)
+
+        let normalizedWebDomain: String
+        if let domain = engine.appMonitor.webAppDomain {
+            normalizedWebDomain = DomainNormalizer.normalizedDomain(for: domain)
+        } else {
+            normalizedWebDomain = "None"
+        }
+
+        return StatusBarSnapshot(
+            statusTitle: engine.status.title,
+            statusDetail: engine.status.detail,
+            statusIsHealthy: engine.status.isHealthy,
+            currentAppName: engine.appMonitor.currentAppName ?? "Unknown",
+            coverageText: coverageText,
+            lifecycleMessage: engine.eventTap.lifecycleMessage,
+            requiresPermission: engine.status == .permissionRequired,
+            effectiveID: appID ?? "None",
+            adapterSource: adapter?.source.rawValue ?? "none",
+            mappingCount: adapter.map { "\($0.mappings.count)" } ?? "0",
+            webDomain: normalizedWebDomain,
+            bridgeStatus: engine.browserBridge?.status.title ?? "Unavailable",
+            eventsIntercepted: engine.eventTap.eventsIntercepted,
+            eventsRemapped: engine.eventTap.eventsRemapped,
+            validationMessages: engine.registry.validationMessages
+        )
+    }
+}
+
+struct StatusBarActions {
+    let openAccessibilitySettings: () -> Void
+    let checkAgain: () -> Void
+    let openSettings: () -> Void
+    let quit: () -> Void
+
+    static let noop = StatusBarActions(
+        openAccessibilitySettings: {},
+        checkAgain: {},
+        openSettings: {},
+        quit: {}
+    )
+
+    static func live(engine: ShortcutEngine) -> StatusBarActions {
+        StatusBarActions(
+            openAccessibilitySettings: { ShortcutEngine.requestAccessibilityPermission() },
+            checkAgain: { engine.checkAccessibilityAndRetry() },
+            openSettings: {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                NSApp.activate(ignoringOtherApps: true)
+            },
+            quit: {
+                engine.stop()
+                NSApp.terminate(nil)
+            }
+        )
+    }
+}
+
+struct StatusBarContentView: View {
+    let snapshot: StatusBarSnapshot
+    let eventTapEnabled: Binding<Bool>
+    let actions: StatusBarActions
+
+    @State private var showsPermissionHelp: Bool
+    @State private var showsAdvancedDiagnostics: Bool
+
+    init(
+        snapshot: StatusBarSnapshot,
+        eventTapEnabled: Binding<Bool>,
+        actions: StatusBarActions = .noop,
+        showsPermissionHelp: Bool = false,
+        showsAdvancedDiagnostics: Bool = false
+    ) {
+        self.snapshot = snapshot
+        self.eventTapEnabled = eventTapEnabled
+        self.actions = actions
+        _showsPermissionHelp = State(initialValue: showsPermissionHelp)
+        _showsAdvancedDiagnostics = State(initialValue: showsAdvancedDiagnostics)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            header
-            statusSummary
-            activeAppSummary
-            permissionActions
+            StatusBarHeader(snapshot: snapshot)
+            StatusSummarySection(snapshot: snapshot)
+            ActiveAppSection(snapshot: snapshot)
+            PermissionSection(
+                snapshot: snapshot,
+                showsPermissionHelp: $showsPermissionHelp,
+                actions: actions
+            )
             Divider()
-            controls
-            advancedDiagnostics
-            footer
+            StatusControlsSection(
+                snapshot: snapshot,
+                eventTapEnabled: eventTapEnabled
+            )
+            AdvancedDiagnosticsSection(
+                snapshot: snapshot,
+                showsAdvancedDiagnostics: $showsAdvancedDiagnostics
+            )
+            StatusFooter(actions: actions)
         }
         .padding()
         .frame(width: 360)
     }
+}
 
-    private var header: some View {
+private struct StatusBarHeader: View {
+    let snapshot: StatusBarSnapshot
+
+    var body: some View {
         HStack(spacing: 10) {
             ShortyMarkView(size: 38)
             VStack(alignment: .leading, spacing: 2) {
@@ -40,25 +169,33 @@ struct StatusBarView: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
-            ShortyStatusDot(status: engine.status)
+            Circle()
+                .fill(snapshot.statusIsHealthy ? ShortyBrand.teal : ShortyBrand.amber)
+                .frame(width: 9, height: 9)
+                .accessibilityLabel(snapshot.statusTitle)
         }
     }
+}
 
-    private var statusSummary: some View {
+private struct StatusSummarySection: View {
+    let snapshot: StatusBarSnapshot
+
+    var body: some View {
         ShortyPanel {
             HStack(alignment: .top, spacing: 10) {
                 Image(
-                    systemName: engine.status.isHealthy
+                    systemName: snapshot.statusIsHealthy
                         ? "checkmark.circle.fill"
                         : "exclamationmark.triangle.fill"
                 )
-                    .foregroundColor(ShortyBrand.statusColor(for: engine.status))
-                    .font(.callout)
+                .foregroundColor(snapshot.statusIsHealthy ? ShortyBrand.teal : ShortyBrand.amber)
+                .font(.callout)
+
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(engine.status.title)
+                    Text(snapshot.statusTitle)
                         .font(.callout)
                         .fontWeight(.semibold)
-                    Text(engine.status.detail)
+                    Text(snapshot.statusDetail)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -66,13 +203,17 @@ struct StatusBarView: View {
             }
         }
     }
+}
 
-    private var activeAppSummary: some View {
+private struct ActiveAppSection: View {
+    let snapshot: StatusBarSnapshot
+
+    var body: some View {
         ShortyPanel {
             VStack(alignment: .leading, spacing: 8) {
-                infoRow("Active app", engine.appMonitor.currentAppName ?? "Unknown")
-                infoRow("Coverage", coverageText)
-                if let lifecycleMessage = engine.eventTap.lifecycleMessage {
+                StatusInfoRow("Active app", snapshot.currentAppName)
+                StatusInfoRow("Coverage", snapshot.coverageText)
+                if let lifecycleMessage = snapshot.lifecycleMessage {
                     Label(lifecycleMessage, systemImage: "arrow.clockwise")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -80,21 +221,22 @@ struct StatusBarView: View {
             }
         }
     }
+}
 
-    @ViewBuilder
-    private var permissionActions: some View {
-        if engine.status == .permissionRequired {
+private struct PermissionSection: View {
+    let snapshot: StatusBarSnapshot
+    @Binding var showsPermissionHelp: Bool
+    let actions: StatusBarActions
+
+    var body: some View {
+        if snapshot.requiresPermission {
             ShortyPanel {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Button("Open Accessibility Settings") {
-                            ShortcutEngine.requestAccessibilityPermission()
-                        }
-                        .buttonStyle(.borderedProminent)
+                        Button("Open Accessibility Settings", action: actions.openAccessibilitySettings)
+                            .buttonStyle(.borderedProminent)
 
-                        Button("Check Again") {
-                            engine.checkAccessibilityAndRetry()
-                        }
+                        Button("Check Again", action: actions.checkAgain)
                     }
                     .controlSize(.small)
 
@@ -110,16 +252,21 @@ struct StatusBarView: View {
             }
         }
     }
+}
 
-    private var controls: some View {
+private struct StatusControlsSection: View {
+    let snapshot: StatusBarSnapshot
+    let eventTapEnabled: Binding<Bool>
+
+    var body: some View {
         ShortyPanel {
             VStack(alignment: .leading, spacing: 10) {
-                Toggle("Shorty enabled", isOn: eventTapEnabledBinding)
+                Toggle("Shorty enabled", isOn: eventTapEnabled)
                     .toggleStyle(.switch)
                     .controlSize(.small)
-                    .disabled(engine.status == .permissionRequired)
+                    .disabled(snapshot.requiresPermission)
 
-                if !engine.eventTap.isEnabled {
+                if !eventTapEnabled.wrappedValue {
                     Text("Shorty is passing every shortcut through unchanged.")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -127,24 +274,29 @@ struct StatusBarView: View {
             }
         }
     }
+}
 
-    private var advancedDiagnostics: some View {
+private struct AdvancedDiagnosticsSection: View {
+    let snapshot: StatusBarSnapshot
+    @Binding var showsAdvancedDiagnostics: Bool
+
+    var body: some View {
         ShortyPanel {
             DisclosureGroup("Advanced Diagnostics", isExpanded: $showsAdvancedDiagnostics) {
                 VStack(alignment: .leading, spacing: 8) {
-                    infoRow("Effective ID", engine.appMonitor.effectiveAppID ?? "None")
-                    infoRow("Adapter source", adapter?.source.rawValue ?? "none")
-                    infoRow("Mappings", adapter.map { "\($0.mappings.count)" } ?? "0")
-                    infoRow("Web domain", normalizedWebDomain)
-                    infoRow("Bridge", engine.browserBridge?.status.title ?? "Unavailable")
-                    infoRow("Intercepted", "\(engine.eventTap.eventsIntercepted)")
-                    infoRow("Remapped", "\(engine.eventTap.eventsRemapped)")
+                    StatusInfoRow("Effective ID", snapshot.effectiveID)
+                    StatusInfoRow("Adapter source", snapshot.adapterSource)
+                    StatusInfoRow("Mappings", snapshot.mappingCount)
+                    StatusInfoRow("Web domain", snapshot.webDomain)
+                    StatusInfoRow("Bridge", snapshot.bridgeStatus)
+                    StatusInfoRow("Intercepted", "\(snapshot.eventsIntercepted)")
+                    StatusInfoRow("Remapped", "\(snapshot.eventsRemapped)")
 
-                    if !engine.registry.validationMessages.isEmpty {
+                    if !snapshot.validationMessages.isEmpty {
                         Text("Adapter validation warnings")
                             .font(.caption)
                             .fontWeight(.semibold)
-                        ForEach(engine.registry.validationMessages, id: \.self) { message in
+                        ForEach(snapshot.validationMessages, id: \.self) { message in
                             Text(message)
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
@@ -157,48 +309,32 @@ struct StatusBarView: View {
             .font(.caption)
         }
     }
+}
 
-    private var footer: some View {
+private struct StatusFooter: View {
+    let actions: StatusBarActions
+
+    var body: some View {
         HStack {
-            Button("Settings...") {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                NSApp.activate(ignoringOtherApps: true)
-            }
+            Button("Settings...", action: actions.openSettings)
 
             Spacer()
 
-            Button("Quit") {
-                engine.stop()
-                NSApp.terminate(nil)
-            }
+            Button("Quit", action: actions.quit)
         }
     }
+}
 
-    private var coverageText: String {
-        if !engine.eventTap.isEnabled {
-            return "Paused"
-        }
-        guard let adapter else {
-            return "Pass through"
-        }
-        return "\(adapter.mappings.count) shortcuts for \(adapter.appName)"
+private struct StatusInfoRow: View {
+    let label: String
+    let value: String
+
+    init(_ label: String, _ value: String) {
+        self.label = label
+        self.value = value
     }
 
-    private var normalizedWebDomain: String {
-        guard let domain = engine.appMonitor.webAppDomain else {
-            return "None"
-        }
-        return DomainNormalizer.normalizedDomain(for: domain)
-    }
-
-    private var eventTapEnabledBinding: Binding<Bool> {
-        Binding(
-            get: { engine.eventTap.isEnabled },
-            set: { engine.eventTap.isEnabled = $0 }
-        )
-    }
-
-    private func infoRow(_ label: String, _ value: String) -> some View {
+    var body: some View {
         HStack(alignment: .firstTextBaseline) {
             Text(label)
                 .foregroundColor(.secondary)

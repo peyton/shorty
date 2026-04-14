@@ -106,6 +106,7 @@ Web:
 - `just web-check` - validate and formatting-check the static site.
 - `just web-fmt` - format static site files.
 - `just web-build` - copy the checked site to `.build/web/`.
+- `just marketing-screenshots` - render deterministic native marketing screenshots into `web/assets/screenshots/`.
 - `just web-package VERSION=test` - package the static site and checksum.
 
 Repository:
