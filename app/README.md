@@ -21,8 +21,14 @@ Shorty is a macOS menu-bar app. It provides a small status-bar popover, a settin
    - `just build`
    - `just run`
    - `just test-app`
+   - `just integration`
 
 `just run` builds the Debug app and opens the generated `.app` bundle.
+`just integration` builds a tiny AppKit fixture app under `.build/fixtures/`
+and launches it with a repo-local macOS automation probe. The probe verifies
+app activation on every run and verifies fixture menu structure when
+Accessibility UI scripting is available. Set `SHORTY_REQUIRE_UI_AUTOMATION=1`
+to make menu inspection mandatory during a release pass.
 
 ## Permissions
 
