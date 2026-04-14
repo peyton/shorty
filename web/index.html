@@ -27,70 +27,165 @@
 
       <main>
         <section class="hero" aria-labelledby="hero-title">
-          <div>
-            <p class="eyebrow">macOS menu bar shortcuts</p>
-            <h1 id="hero-title">One shortcut set across your Mac.</h1>
-            <p class="lede">
-              Shorty runs in the menu bar, watches the front app, and remaps a
-              small trusted set of shortcuts locally.
-            </p>
-            <div class="actions">
-              <a
-                class="button"
-                href="https://github.com/peyton/shorty/releases/latest"
-                >Download for macOS</a
-              >
-              <a class="button secondary" href="/support/">Setup help</a>
+          <div class="hero-inner">
+            <div class="hero-copy">
+              <p class="eyebrow">macOS command map</p>
+              <h1 id="hero-title">Shortcuts stay put.</h1>
+              <p class="lede">
+                Shorty watches the front app and maps a small trusted shortcut
+                set to the native command that app expects.
+              </p>
+              <div class="actions">
+                <a
+                  class="button"
+                  href="https://github.com/peyton/shorty/releases/latest"
+                  >Download for macOS</a
+                >
+                <a class="button secondary" href="/support/">Setup checks</a>
+              </div>
+              <p class="download-note">
+                Releases include
+                <code>shorty-&lt;version&gt;-macos.zip</code> and a matching
+                <code>.sha256</code> checksum file.
+              </p>
             </div>
-            <p class="download-note">
-              Releases include <code>shorty-&lt;version&gt;-macos.zip</code> and
-              a matching <code>.sha256</code> checksum file.
-            </p>
-          </div>
-          <div class="hero-art" aria-hidden="true">
-            <img
-              class="app-mark"
-              src="/assets/app-icon.svg"
-              alt=""
-              width="340"
-              height="340"
-            />
+            <div class="hero-art" aria-hidden="true">
+              <img
+                class="hero-map"
+                src="/assets/command-map-hero.svg"
+                alt=""
+                width="980"
+                height="720"
+              />
+            </div>
           </div>
         </section>
 
-        <section class="section alt" aria-labelledby="flow-title">
+        <section class="section alt" aria-labelledby="release-title">
           <div class="section-inner">
-            <h2 id="flow-title">A direct download with a visible checksum.</h2>
+            <p class="eyebrow">Release path</p>
+            <h2 id="release-title">Download, verify, allow.</h2>
             <p class="section-copy">
-              Download the archive from the latest release, compare the SHA-256
-              line, then drag Shorty to Applications.
+              Shorty ships as a direct macOS archive with a visible checksum.
+              Accessibility access is requested only when the local shortcut
+              engine needs it.
             </p>
-            <div class="steps release-steps">
-              <article class="step">
-                <strong>Download</strong>
-                <p>
-                  Use the latest GitHub release asset named
-                  <code>shorty-&lt;version&gt;-macos.zip</code>.
-                </p>
+            <div class="release-flow">
+              <article class="flow-step">
+                <img
+                  src="/assets/glyph-native.svg"
+                  alt=""
+                  width="48"
+                  height="48"
+                />
+                <div>
+                  <strong>Download the app archive</strong>
+                  <p>
+                    Use the latest GitHub release asset named
+                    <code>shorty-&lt;version&gt;-macos.zip</code>.
+                  </p>
+                </div>
+                <span class="meta">local app</span>
               </article>
-              <article class="step">
-                <strong>Verify</strong>
-                <p>
-                  Open the matching <code>.sha256</code> file and compare it
-                  with the archive before opening the app.
-                </p>
+              <article class="flow-step">
+                <img
+                  src="/assets/glyph-checksum.svg"
+                  alt=""
+                  width="48"
+                  height="48"
+                />
+                <div>
+                  <strong>Compare the checksum</strong>
+                  <p>
+                    Match the archive hash against the published
+                    <code>.sha256</code> file before opening Shorty.
+                  </p>
+                </div>
+                <span class="meta">sha-256</span>
               </article>
-              <article class="step">
-                <strong>Allow</strong>
-                <p>
-                  Grant Accessibility access when macOS asks so Shorty can read
-                  menus and install its keyboard event tap.
-                </p>
+              <article class="flow-step">
+                <img
+                  src="/assets/glyph-diagnostics.svg"
+                  alt=""
+                  width="48"
+                  height="48"
+                />
+                <div>
+                  <strong>Grant Accessibility access</strong>
+                  <p>
+                    Allow Shorty in macOS System Settings so it can read menus
+                    and install its keyboard event tap.
+                  </p>
+                </div>
+                <span class="meta">macOS only</span>
               </article>
             </div>
             <div class="checksum-box" aria-label="Checksum command">
               <span>Checksum command</span>
-              <code>shasum -a 256 shorty-&lt;version&gt;-macos.zip</code>
+              <code>shasum -a 256<br />shorty-&lt;version&gt;-macos.zip</code>
+            </div>
+          </div>
+        </section>
+
+        <section class="section graphite" aria-labelledby="map-title">
+          <div class="section-inner split">
+            <div>
+              <p class="eyebrow">Local routing</p>
+              <h2 id="map-title">One shortcut intent, app-specific output.</h2>
+              <p class="section-copy">
+                Built-in and reviewed adapters translate canonical shortcuts
+                into native keys, menu commands, or pass-through behavior.
+              </p>
+            </div>
+            <div class="map-list">
+              <article class="map-item">
+                <img
+                  class="glyph"
+                  src="/assets/glyph-native.svg"
+                  alt=""
+                  width="48"
+                  height="48"
+                />
+                <div>
+                  <strong>Native apps first</strong>
+                  <p>
+                    Bundled adapters load locally and work without a browser
+                    bridge or external service.
+                  </p>
+                </div>
+              </article>
+              <article class="map-item">
+                <img
+                  class="glyph"
+                  src="/assets/glyph-bridge.svg"
+                  alt=""
+                  width="48"
+                  height="48"
+                />
+                <div>
+                  <strong>Browser bridge optional</strong>
+                  <p>
+                    Supported Chrome-family browsers can report selected web app
+                    domains when you install the bridge.
+                  </p>
+                </div>
+              </article>
+              <article class="map-item">
+                <img
+                  class="glyph"
+                  src="/assets/glyph-diagnostics.svg"
+                  alt=""
+                  width="48"
+                  height="48"
+                />
+                <div>
+                  <strong>Diagnostics stay visible</strong>
+                  <p>
+                    The menu bar popover shows active coverage, permission
+                    state, bridge state, and adapter warnings.
+                  </p>
+                </div>
+              </article>
             </div>
           </div>
         </section>
@@ -98,19 +193,16 @@
         <section class="section" aria-labelledby="shortcuts-title">
           <div class="section-inner split">
             <div>
-              <h2 id="shortcuts-title">
-                Native first. Browser bridge optional.
-              </h2>
+              <p class="eyebrow">Canonical keys</p>
+              <h2 id="shortcuts-title">Your hands keep the same map.</h2>
               <p class="section-copy">
-                Shorty works without cloud services. Browser support is an
-                explicit install for supported Chrome-family browsers.
+                Shorty keeps common intent names stable while the active app
+                receives the shortcut it already understands.
               </p>
               <ul class="plain-list">
-                <li>Bundled native adapters load automatically.</li>
                 <li>Generated adapters require review before saving.</li>
-                <li>
-                  Browser domains are limited to supported web apps by default.
-                </li>
+                <li>Unknown apps pass shortcuts through unchanged.</li>
+                <li>Supported web domains are limited by default.</li>
               </ul>
             </div>
             <div class="shortcut-stack" aria-label="Example shortcut list">
@@ -131,15 +223,34 @@
         </section>
 
         <section class="section alt" aria-labelledby="contact-title">
-          <div class="section-inner">
-            <h2 id="contact-title">Support paths are short.</h2>
-            <p class="section-copy">
-              Start with the
-              <a href="/support/">Accessibility and bridge checks</a>. Email
-              <a href="mailto:shorty@peyton.app">shorty@peyton.app</a> with the
-              macOS version, app name, and shortcut if the behavior still looks
-              wrong.
-            </p>
+          <div class="section-inner split">
+            <div>
+              <p class="eyebrow">Support</p>
+              <h2 id="contact-title">Short checks before email.</h2>
+              <p class="section-copy">
+                Start with the
+                <a href="/support/">Accessibility and bridge checks</a>. Email
+                <a href="mailto:shorty@peyton.app">shorty@peyton.app</a> with
+                the macOS version, app name, and shortcut if the behavior still
+                looks wrong.
+              </p>
+            </div>
+            <article class="support-item">
+              <img
+                class="glyph"
+                src="/assets/glyph-support.svg"
+                alt=""
+                width="48"
+                height="48"
+              />
+              <div>
+                <strong>Include the active app</strong>
+                <p>
+                  The app name, shortcut, and current Shorty status are enough
+                  to start diagnosing most reports.
+                </p>
+              </div>
+            </article>
           </div>
         </section>
       </main>

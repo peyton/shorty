@@ -22,6 +22,7 @@ struct ShortyApp: App {
     var body: some Scene {
         MenuBarExtra {
             StatusBarView(engine: appDelegate.engine)
+                .tint(ShortyBrand.teal)
         } label: {
             StatusIconView(engine: appDelegate.engine)
         }
@@ -29,6 +30,7 @@ struct ShortyApp: App {
 
         Settings {
             SettingsView(engine: appDelegate.engine)
+                .tint(ShortyBrand.teal)
         }
     }
 }
@@ -37,19 +39,6 @@ private struct StatusIconView: View {
     @ObservedObject var engine: ShortcutEngine
 
     var body: some View {
-        Image(systemName: iconName)
-    }
-
-    private var iconName: String {
-        switch engine.status {
-        case .running:
-            return "keyboard.fill"
-        case .disabled:
-            return "keyboard"
-        case .permissionRequired, .failed:
-            return "exclamationmark.triangle.fill"
-        case .stopped, .starting:
-            return "keyboard"
-        }
+        ShortyMenuBarGlyph(status: engine.status)
     }
 }

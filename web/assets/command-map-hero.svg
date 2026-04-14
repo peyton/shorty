@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 720" role="img" aria-labelledby="title desc">
+  <title id="title">Command map shortcut routing</title>
+  <desc id="desc">Shortcut keys route from a canonical command row to native macOS apps and supported web apps.</desc>
+  <defs>
+    <linearGradient id="backdrop" x1="132" x2="860" y1="40" y2="674" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f9fbf9" />
+      <stop offset="1" stop-color="#e8f0ec" />
+    </linearGradient>
+    <linearGradient id="graphite" x1="202" x2="778" y1="126" y2="604" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#26312d" />
+      <stop offset="1" stop-color="#111716" />
+    </linearGradient>
+    <filter id="soft-shadow" x="120" y="68" width="740" height="600" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="22" flood-color="#17211e" flood-opacity=".14" stdDeviation="24" />
+    </filter>
+  </defs>
+  <rect width="980" height="720" rx="52" fill="url(#backdrop)" />
+  <path d="M58 600c110-44 173-79 274-76 121 4 169 63 294 48 102-12 178-65 302-42" fill="none" stroke="#d0ddd6" stroke-linecap="round" stroke-width="2" />
+  <path d="M112 146h756" fill="none" stroke="#d0ddd6" stroke-linecap="round" stroke-width="2" />
+  <path d="M112 246h756" fill="none" stroke="#d0ddd6" stroke-linecap="round" stroke-width="2" />
+  <path d="M112 346h756" fill="none" stroke="#d0ddd6" stroke-linecap="round" stroke-width="2" />
+  <path d="M112 446h756" fill="none" stroke="#d0ddd6" stroke-linecap="round" stroke-width="2" />
+  <g filter="url(#soft-shadow)">
+    <rect x="168" y="96" width="644" height="492" rx="34" fill="#ffffff" />
+    <rect x="168" y="96" width="644" height="78" rx="34" fill="url(#graphite)" />
+    <path d="M168 145h644" stroke="#111716" stroke-opacity=".4" />
+    <circle cx="213" cy="135" r="9" fill="#c18427" />
+    <circle cx="241" cy="135" r="9" fill="#d4ded8" />
+    <circle cx="269" cy="135" r="9" fill="#0f766e" />
+    <text x="310" y="142" fill="#f8fbf8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="700">Shorty command map</text>
+    <g fill="#f8fbf8" opacity=".78">
+      <rect x="652" y="124" width="28" height="22" rx="6" />
+      <rect x="688" y="124" width="28" height="22" rx="6" />
+      <rect x="724" y="124" width="48" height="22" rx="6" />
+    </g>
+    <g font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif">
+      <text x="214" y="222" fill="#5c6862" font-size="15" font-weight="700">CANONICAL SHORTCUT</text>
+      <text x="214" y="254" fill="#111716" font-size="34" font-weight="800">Command K</text>
+      <text x="214" y="284" fill="#5c6862" font-size="18">Search everywhere</text>
+      <rect x="214" y="322" width="96" height="46" rx="10" fill="#111716" />
+      <rect x="322" y="322" width="96" height="46" rx="10" fill="#111716" />
+      <text x="242" y="352" fill="#ffffff" font-size="17" font-weight="800">CMD</text>
+      <text x="360" y="352" fill="#ffffff" font-size="17" font-weight="800">K</text>
+      <rect x="214" y="412" width="168" height="42" rx="9" fill="#ecf4f0" />
+      <text x="236" y="438" fill="#0b5d56" font-size="16" font-weight="800">Local matching</text>
+    </g>
+    <path d="M466 254c71 0 71 70 138 70h40" fill="none" stroke="#0f766e" stroke-linecap="round" stroke-width="8" />
+    <path d="M466 347c71 0 71-57 138-57h40" fill="none" stroke="#c18427" stroke-linecap="round" stroke-width="8" />
+    <path d="M466 392c74 0 74 69 141 69h37" fill="none" stroke="#0f766e" stroke-linecap="round" stroke-width="8" opacity=".48" />
+    <g font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif">
+      <rect x="644" y="250" width="116" height="72" rx="16" fill="#111716" />
+      <text x="676" y="281" fill="#f8fbf8" font-size="15" font-weight="800">Native</text>
+      <text x="677" y="304" fill="#cfdad4" font-size="13">menu item</text>
+      <rect x="644" y="340" width="116" height="72" rx="16" fill="#ecf4f0" />
+      <text x="677" y="371" fill="#0b5d56" font-size="15" font-weight="800">Adapter</text>
+      <text x="677" y="394" fill="#5c6862" font-size="13">reviewed</text>
+      <rect x="644" y="430" width="116" height="72" rx="16" fill="#fff8ea" />
+      <text x="674" y="461" fill="#8a5a12" font-size="15" font-weight="800">Bridge</text>
+      <text x="673" y="484" fill="#6d6254" font-size="13">optional</text>
+    </g>
+  </g>
+  <g fill="none" stroke="#0f766e" stroke-linecap="round" stroke-width="7" opacity=".7">
+    <path d="M108 620h72c34 0 34-30 68-30h54" />
+    <path d="M780 626h72c34 0 34-30 68-30h24" />
+  </g>
+</svg>
