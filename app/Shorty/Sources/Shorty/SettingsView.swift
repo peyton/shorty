@@ -1,17 +1,161 @@
 import AppKit
+import Combine
 import SafariServices
 import ShortyCore
 import SwiftUI
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
-    @ObservedObject var engine: ShortcutEngine
+    @StateObject private var snapshotStore: SettingsSnapshotStore
+    private let actions: SettingsActions
+
+    init(engine: ShortcutEngine) {
+        _snapshotStore = StateObject(wrappedValue: SettingsSnapshotStore(engine: engine))
+        self.actions = .live(engine: engine)
+    }
 
     var body: some View {
         SettingsContentView(
-            snapshot: .live(engine: engine),
-            actions: .live(engine: engine)
+            snapshot: snapshotStore.snapshot,
+            actions: actions
         )
+    }
+}
+
+private final class SettingsSnapshotStore: ObservableObject {
+    @Published private(set) var snapshot: SettingsSnapshot
+
+    private let engine: ShortcutEngine
+    private let versionBuild: String
+    private var shortcutConflicts: [ShortcutConflict]
+    private var sortedAdapters: [Adapter]
+    private var cancellables = Set<AnyCancellable>()
+    private var refreshScheduled = false
+
+    init(engine: ShortcutEngine) {
+        self.engine = engine
+        self.versionBuild = Self.bundleVersionBuild()
+        self.shortcutConflicts = engine.shortcutProfile.conflicts()
+        self.sortedAdapters = Self.sortedAdapters(engine.registry.allAdapters)
+        self.snapshot = SettingsSnapshot.live(
+            engine: engine,
+            versionBuild: versionBuild,
+            shortcutConflicts: shortcutConflicts,
+            adapters: sortedAdapters
+        )
+
+        bind()
+    }
+
+    private func bind() {
+        observe(engine.$status) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$permissionState) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$updateStatus) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$safariExtensionStatus) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$isFirstRunComplete) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$generatedAdapterPreview) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$adapterGenerationMessage) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$shortcutProfile) { [weak self] profile in
+            guard let self else { return }
+            self.shortcutConflicts = profile.conflicts()
+            self.scheduleRefresh()
+        }
+
+        observe(engine.registry.$adapters) { [weak self] adapters in
+            guard let self else { return }
+            self.sortedAdapters = Self.sortedAdapters(Array(adapters.values))
+            self.scheduleRefresh()
+        }
+        observe(engine.registry.$validationMessages) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+
+        observe(engine.appMonitor.$currentBundleID) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.appMonitor.$currentAppName) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.appMonitor.$webAppDomain) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.appMonitor.$browserContextSource) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+
+        observe(engine.eventTap.$eventsIntercepted) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.eventTap.$eventsRemapped) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+
+        if let browserBridge = engine.browserBridge {
+            observe(browserBridge.$status) { [weak self] _ in
+                self?.scheduleRefresh()
+            }
+        }
+    }
+
+    private func observe<P: Publisher>(
+        _ publisher: P,
+        receiveValue: @escaping (P.Output) -> Void
+    ) where P.Failure == Never {
+        publisher
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink(receiveValue: receiveValue)
+            .store(in: &cancellables)
+    }
+
+    private func scheduleRefresh() {
+        guard !refreshScheduled else { return }
+        refreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.refreshScheduled = false
+            self.refresh()
+        }
+    }
+
+    private func refresh() {
+        snapshot = SettingsSnapshot.live(
+            engine: engine,
+            versionBuild: versionBuild,
+            shortcutConflicts: shortcutConflicts,
+            adapters: sortedAdapters
+        )
+    }
+
+    private static func sortedAdapters(_ adapters: [Adapter]) -> [Adapter] {
+        adapters.sorted { lhs, rhs in
+            let nameOrder = lhs.appName.localizedCaseInsensitiveCompare(rhs.appName)
+            if nameOrder != .orderedSame {
+                return nameOrder == .orderedAscending
+            }
+            return lhs.appIdentifier < rhs.appIdentifier
+        }
+    }
+
+    private static func bundleVersionBuild() -> String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        let build = info?["CFBundleVersion"] as? String ?? "Unknown"
+        return "\(version) (\(build))"
     }
 }
 
@@ -42,21 +186,23 @@ struct SettingsSnapshot {
     let firstRunComplete: Bool
     let diagnostics: RuntimeDiagnosticSnapshot
 
-    static func live(engine: ShortcutEngine) -> SettingsSnapshot {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "Unknown"
-        let build = info?["CFBundleVersion"] as? String ?? "Unknown"
+    static func live(
+        engine: ShortcutEngine,
+        versionBuild: String,
+        shortcutConflicts: [ShortcutConflict],
+        adapters: [Adapter]
+    ) -> SettingsSnapshot {
         let diagnostics = engine.diagnosticSnapshot()
 
         return SettingsSnapshot(
             shortcuts: engine.shortcutProfile.shortcuts,
             shortcutProfile: engine.shortcutProfile,
-            shortcutConflicts: engine.shortcutProfile.conflicts(),
-            adapters: engine.registry.allAdapters,
+            shortcutConflicts: shortcutConflicts,
+            adapters: adapters,
             validationMessages: engine.registry.validationMessages,
             adapterGenerationMessage: engine.adapterGenerationMessage,
             generatedAdapterPreview: engine.generatedAdapterPreview,
-            versionBuild: "\(version) (\(build))",
+            versionBuild: versionBuild,
             engineStatus: engine.status.title,
             accessibilityStatus: ShortcutEngine.hasAccessibilityPermission ? "Granted" : "Not granted",
             browserBridgeStatus: engine.browserBridge?.status.title ?? "Unavailable",
@@ -169,7 +315,6 @@ struct SettingsContentView: View {
                     || adapter.appName.localizedCaseInsensitiveContains(query)
                     || adapter.appIdentifier.localizedCaseInsensitiveContains(query)
             }
-            .sorted { $0.appName < $1.appName }
     }
 
     init(
