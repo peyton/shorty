@@ -4,6 +4,8 @@ import Combine
 /// Top-level orchestrator for monitoring the active app, resolving adapters,
 /// installing the keyboard event tap, and running the optional browser bridge.
 public final class ShortcutEngine: ObservableObject {
+    public static let firstRunCompleteDefaultsKey = "Shorty.FirstRun.Complete"
+    public static let updateChecksEnabledDefaultsKey = "Shorty.Updates.AutomaticChecksEnabled"
 
     // MARK: - Sub-components
 
@@ -20,6 +22,10 @@ public final class ShortcutEngine: ObservableObject {
     @Published public private(set) var isRunning: Bool = false
     @Published public private(set) var status: EngineStatus = .stopped
     @Published public private(set) var permissionState: PermissionState = .unknown
+    @Published public private(set) var shortcutProfile: UserShortcutProfile
+    @Published public private(set) var updateStatus: UpdateStatus
+    @Published public private(set) var safariExtensionStatus = SafariExtensionStatus()
+    @Published public private(set) var isFirstRunComplete: Bool
     @Published public private(set) var generatedAdapterPreview: Adapter?
     @Published public private(set) var adapterGenerationMessage: String?
 
@@ -31,14 +37,30 @@ public final class ShortcutEngine: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var appChangeObserverInstalled = false
     private var adapterGenerationInFlight = Set<String>()
+    private let userDefaults: UserDefaults
+    private let safariExtensionUserDefaults: UserDefaults?
 
     // MARK: - Init
 
     public init(
         configuration: EngineConfiguration = .releaseDefault,
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = .standard,
+        safariExtensionUserDefaults: UserDefaults? = UserDefaults(
+            suiteName: SafariExtensionBridge.appGroupSuiteName
+        )
     ) {
         self.configuration = configuration
+        self.userDefaults = userDefaults
+        self.safariExtensionUserDefaults = safariExtensionUserDefaults
+        self.shortcutProfile = .releaseDefault
+        self.isFirstRunComplete = userDefaults.bool(
+            forKey: Self.firstRunCompleteDefaultsKey
+        )
+        self.updateStatus = UpdateStatus(
+            automaticChecksEnabled: userDefaults.bool(
+                forKey: Self.updateChecksEnabledDefaultsKey
+            )
+        )
         self.appMonitor = AppMonitor()
         self.registry = AdapterRegistry()
         self.eventTap = EventTapManager(
@@ -51,6 +73,13 @@ public final class ShortcutEngine: ObservableObject {
             appMonitor: appMonitor,
             configuration: configuration
         )
+
+        DistributedNotificationCenter.default()
+            .publisher(for: SafariExtensionBridge.notificationName)
+            .sink { [weak self] _ in
+                self?.refreshSafariExtensionMessage()
+            }
+            .store(in: &cancellables)
 
         eventTap.$isEnabled
             .removeDuplicates()
@@ -72,6 +101,7 @@ public final class ShortcutEngine: ObservableObject {
 
         setStatus(.starting)
         installAppChangeObserverIfNeeded()
+        refreshSafariExtensionMessage()
         browserBridge?.start()
         refreshPermissionState()
 
@@ -161,6 +191,131 @@ public final class ShortcutEngine: ObservableObject {
     public func discardGeneratedAdapterPreview() {
         generatedAdapterPreview = nil
         adapterGenerationMessage = nil
+    }
+
+    // MARK: - User configuration
+
+    public func applyShortcutProfile(_ profile: UserShortcutProfile) {
+        shortcutProfile = profile
+        registry.applyShortcutProfile(profile)
+    }
+
+    public func markFirstRunComplete() {
+        isFirstRunComplete = true
+        userDefaults.set(true, forKey: Self.firstRunCompleteDefaultsKey)
+    }
+
+    public func resetFirstRunState() {
+        isFirstRunComplete = false
+        userDefaults.set(false, forKey: Self.firstRunCompleteDefaultsKey)
+    }
+
+    public func setAutomaticUpdateChecksEnabled(_ isEnabled: Bool) {
+        userDefaults.set(isEnabled, forKey: Self.updateChecksEnabledDefaultsKey)
+        updateStatus = UpdateStatus(
+            state: isEnabled ? .idle : .notConfigured,
+            lastCheckedAt: updateStatus.lastCheckedAt,
+            automaticChecksEnabled: isEnabled,
+            detail: isEnabled
+                ? "Shorty will use the direct-download update feed when Sparkle is bundled."
+                : "Automatic direct-download update checks are off."
+        )
+    }
+
+    public func recordUpdateCheckResult(
+        state: UpdateStatus.State,
+        detail: String,
+        checkedAt: Date = Date()
+    ) {
+        updateStatus = UpdateStatus(
+            state: state,
+            lastCheckedAt: checkedAt,
+            automaticChecksEnabled: updateStatus.automaticChecksEnabled,
+            detail: detail
+        )
+    }
+
+    public func recordSafariExtensionMessage(domain: String) {
+        let normalized = DomainNormalizer.normalizedDomain(for: domain)
+        appMonitor.updateBrowserContext(domain: normalized, source: .safariExtension)
+        safariExtensionStatus = SafariExtensionStatus(
+            state: .enabled,
+            lastMessageAt: Date(),
+            lastDomain: normalized,
+            detail: "Safari reported \(normalized)."
+        )
+    }
+
+    public func refreshSafariExtensionMessage() {
+        guard let message = SafariExtensionBridge.readLastMessage(
+            userDefaults: safariExtensionUserDefaults
+        ) else {
+            if safariExtensionStatus.state == .unknown {
+                safariExtensionStatus = SafariExtensionStatus(
+                    state: .bundled,
+                    detail: "The Safari extension is bundled. Enable it in Safari Settings to report active web-app domains."
+                )
+            }
+            return
+        }
+
+        switch message.kind {
+        case .domainChanged:
+            guard let domain = message.domain, !domain.isEmpty else { return }
+            let normalized = DomainNormalizer.normalizedDomain(for: domain)
+            appMonitor.updateBrowserContext(
+                domain: normalized,
+                source: .safariExtension
+            )
+            safariExtensionStatus = SafariExtensionStatus(
+                state: .enabled,
+                lastMessageAt: message.createdAt,
+                lastDomain: normalized,
+                detail: "Safari reported \(normalized)."
+            )
+        case .domainCleared:
+            appMonitor.clearBrowserContext(source: .safariExtension)
+            safariExtensionStatus = SafariExtensionStatus(
+                state: .enabled,
+                lastMessageAt: message.createdAt,
+                lastDomain: nil,
+                detail: "Safari is connected; the active tab is not a supported web app."
+            )
+        }
+    }
+
+    public func setSafariExtensionStatus(_ status: SafariExtensionStatus) {
+        safariExtensionStatus = status
+    }
+
+    public func diagnosticSnapshot() -> RuntimeDiagnosticSnapshot {
+        RuntimeDiagnosticSnapshot(
+            engineStatus: status.title,
+            permissionState: permissionState,
+            currentAppName: appMonitor.currentAppName,
+            currentBundleID: appMonitor.currentBundleID,
+            effectiveAppID: appMonitor.effectiveAppID,
+            browserContextSource: appMonitor.browserContextSource,
+            webDomain: appMonitor.webAppDomain,
+            bridgeStatus: browserBridge?.status.title ?? "Unavailable",
+            safariExtensionStatus: safariExtensionStatus,
+            eventsIntercepted: eventTap.eventsIntercepted,
+            eventsRemapped: eventTap.eventsRemapped,
+            adapterValidationMessages: registry.validationMessages
+        )
+    }
+
+    public func supportBundle() -> SupportBundle {
+        SupportBundle(
+            diagnostics: diagnosticSnapshot(),
+            shortcutProfile: shortcutProfile,
+            adapters: registry.allAdapters.map(\.appIdentifier).sorted(),
+            notes: shortcutProfile.conflicts().map(\.message)
+        )
+    }
+
+    public func exportSupportBundle(to url: URL) throws {
+        try supportBundle().encodedJSON().write(to: url, options: .atomic)
     }
 
     private func installAppChangeObserverIfNeeded() {

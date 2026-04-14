@@ -227,6 +227,8 @@ private struct ScreenshotFixtures {
     init() {
         settings = SettingsSnapshot(
             shortcuts: CanonicalShortcut.defaults,
+            shortcutProfile: .releaseDefault,
+            shortcutConflicts: UserShortcutProfile.releaseDefault.conflicts(),
             adapters: Self.adapters,
             validationMessages: [],
             adapterGenerationMessage: "Generated 6 mappings for Things. Review before saving.",
@@ -234,7 +236,35 @@ private struct ScreenshotFixtures {
             versionBuild: "1.0.0 (1)",
             engineStatus: "Shorty is active",
             accessibilityStatus: "Granted",
-            browserBridgeStatus: "Browser bridge ready"
+            browserBridgeStatus: "Browser bridge ready",
+            safariExtensionStatus: SafariExtensionStatus(
+                state: .bundled,
+                detail: "The Safari extension is included with this build. Enable it in Safari Settings before using web-app adapters in Safari."
+            ),
+            updateStatus: UpdateStatus(
+                state: .idle,
+                currentVersion: "1.0.0",
+                automaticChecksEnabled: true,
+                detail: "Updates are ready for signed direct-download builds."
+            ),
+            firstRunComplete: false,
+            diagnostics: RuntimeDiagnosticSnapshot(
+                engineStatus: "Shorty is active",
+                permissionState: .granted,
+                currentAppName: "Linear",
+                currentBundleID: "com.linear",
+                effectiveAppID: "com.linear",
+                browserContextSource: .none,
+                webDomain: nil,
+                bridgeStatus: "Browser bridge ready",
+                safariExtensionStatus: SafariExtensionStatus(
+                    state: .bundled,
+                    detail: "The Safari extension is included with this build."
+                ),
+                eventsIntercepted: 184,
+                eventsRemapped: 57,
+                adapterValidationMessages: []
+            )
         )
 
         activeStatus = StatusBarSnapshot(
@@ -249,7 +279,10 @@ private struct ScreenshotFixtures {
             adapterSource: "builtin",
             mappingCount: "2",
             webDomain: "None",
+            browserContextSource: "No browser context",
             bridgeStatus: "Browser bridge ready",
+            safariExtensionStatus: "Safari extension bundled",
+            shortcutReviewCount: UserShortcutProfile.releaseDefault.conflicts().count,
             eventsIntercepted: 184,
             eventsRemapped: 57,
             validationMessages: []
@@ -267,7 +300,10 @@ private struct ScreenshotFixtures {
             adapterSource: "builtin",
             mappingCount: "4",
             webDomain: "None",
+            browserContextSource: "No browser context",
             bridgeStatus: "Browser bridge stopped",
+            safariExtensionStatus: "Safari extension disabled",
+            shortcutReviewCount: UserShortcutProfile.releaseDefault.conflicts().count,
             eventsIntercepted: 0,
             eventsRemapped: 0,
             validationMessages: []

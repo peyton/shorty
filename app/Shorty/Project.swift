@@ -52,10 +52,64 @@ let project = Project(
             resources: [
                 "Sources/Shorty/Resources/**"
             ],
+            entitlements: "Shorty.entitlements",
             dependencies: [
-                .target(name: "ShortyCore")
+                .target(name: "ShortyCore"),
+                .target(name: "ShortySafariWebExtension")
             ],
             settings: targetSettings(includeAppAssets: true)
+        ),
+        .target(
+            name: "ShortyAppStore",
+            destinations: .macOS,
+            product: .app,
+            bundleId: "app.peyton.shorty.appstore",
+            deploymentTargets: defaultDeploymentTarget,
+            infoPlist: .file(path: "Info.plist"),
+            sources: [
+                "Sources/Shorty/**"
+            ],
+            resources: [
+                "Sources/Shorty/Resources/**"
+            ],
+            entitlements: "ShortyAppStore.entitlements",
+            dependencies: [
+                .target(name: "ShortyCore"),
+                .target(name: "ShortyAppStoreSafariWebExtension")
+            ],
+            settings: targetSettings(includeAppAssets: true)
+        ),
+        .target(
+            name: "ShortySafariWebExtension",
+            destinations: .macOS,
+            product: .appExtension,
+            bundleId: "app.peyton.shorty.SafariWebExtension",
+            deploymentTargets: defaultDeploymentTarget,
+            infoPlist: .file(path: "Sources/ShortySafariWebExtension/Info.plist"),
+            sources: [
+                "Sources/ShortySafariWebExtension/**"
+            ],
+            resources: [
+                "Sources/ShortySafariWebExtension/Resources/**"
+            ],
+            entitlements: "ShortySafariWebExtension.entitlements",
+            settings: targetSettings()
+        ),
+        .target(
+            name: "ShortyAppStoreSafariWebExtension",
+            destinations: .macOS,
+            product: .appExtension,
+            bundleId: "app.peyton.shorty.appstore.SafariWebExtension",
+            deploymentTargets: defaultDeploymentTarget,
+            infoPlist: .file(path: "Sources/ShortySafariWebExtension/Info.plist"),
+            sources: [
+                "Sources/ShortySafariWebExtension/**"
+            ],
+            resources: [
+                "Sources/ShortySafariWebExtension/Resources/**"
+            ],
+            entitlements: "ShortySafariWebExtension.entitlements",
+            settings: targetSettings()
         ),
         .target(
             name: "ShortyBridge",

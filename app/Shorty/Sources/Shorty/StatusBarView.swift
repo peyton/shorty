@@ -33,7 +33,10 @@ struct StatusBarSnapshot {
     let adapterSource: String
     let mappingCount: String
     let webDomain: String
+    let browserContextSource: String
     let bridgeStatus: String
+    let safariExtensionStatus: String
+    let shortcutReviewCount: Int
     let eventsIntercepted: Int
     let eventsRemapped: Int
     let validationMessages: [String]
@@ -70,7 +73,10 @@ struct StatusBarSnapshot {
             adapterSource: adapter?.source.rawValue ?? "none",
             mappingCount: adapter.map { "\($0.mappings.count)" } ?? "0",
             webDomain: normalizedWebDomain,
+            browserContextSource: engine.appMonitor.browserContextSource.title,
             bridgeStatus: engine.browserBridge?.status.title ?? "Unavailable",
+            safariExtensionStatus: engine.safariExtensionStatus.title,
+            shortcutReviewCount: engine.shortcutProfile.conflicts().count,
             eventsIntercepted: engine.eventTap.eventsIntercepted,
             eventsRemapped: engine.eventTap.eventsRemapped,
             validationMessages: engine.registry.validationMessages
@@ -288,7 +294,10 @@ private struct AdvancedDiagnosticsSection: View {
                     StatusInfoRow("Adapter source", snapshot.adapterSource)
                     StatusInfoRow("Mappings", snapshot.mappingCount)
                     StatusInfoRow("Web domain", snapshot.webDomain)
+                    StatusInfoRow("Browser source", snapshot.browserContextSource)
                     StatusInfoRow("Bridge", snapshot.bridgeStatus)
+                    StatusInfoRow("Safari", snapshot.safariExtensionStatus)
+                    StatusInfoRow("Shortcut review", "\(snapshot.shortcutReviewCount)")
                     StatusInfoRow("Intercepted", "\(snapshot.eventsIntercepted)")
                     StatusInfoRow("Remapped", "\(snapshot.eventsRemapped)")
 

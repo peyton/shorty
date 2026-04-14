@@ -22,6 +22,9 @@ public final class AppMonitor: ObservableObject {
     /// When set, this overrides bundle-ID-based adapter lookup.
     @Published public var webAppDomain: String?
 
+    /// Describes which browser integration last supplied `webAppDomain`.
+    @Published public private(set) var browserContextSource: BrowserContextSource = .none
+
     /// The effective identifier used for adapter lookup.
     /// Returns "web:<domain>" if a browser extension has reported a web app,
     /// otherwise the native bundle ID.
@@ -72,8 +75,22 @@ public final class AppMonitor: ObservableObject {
         currentPID = processIdentifier
 
         if previousBundleID != bundleIdentifier || !isBrowser(bundleIdentifier) {
-            webAppDomain = nil
+            clearBrowserContext()
         }
+    }
+
+    public func updateBrowserContext(
+        domain: String,
+        source: BrowserContextSource
+    ) {
+        webAppDomain = DomainNormalizer.normalizedDomain(for: domain)
+        browserContextSource = source
+    }
+
+    public func clearBrowserContext(source: BrowserContextSource? = nil) {
+        guard source == nil || source == browserContextSource else { return }
+        webAppDomain = nil
+        browserContextSource = .none
     }
 
     // MARK: - Browser detection

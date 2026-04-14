@@ -1,5 +1,8 @@
+import AppKit
+import SafariServices
 import ShortyCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @ObservedObject var engine: ShortcutEngine
@@ -13,13 +16,19 @@ struct SettingsView: View {
 }
 
 enum SettingsTab: Hashable {
+    case setup
     case shortcuts
     case adapters
+    case browsers
+    case updates
+    case diagnostics
     case about
 }
 
 struct SettingsSnapshot {
     let shortcuts: [CanonicalShortcut]
+    let shortcutProfile: UserShortcutProfile
+    let shortcutConflicts: [ShortcutConflict]
     let adapters: [Adapter]
     let validationMessages: [String]
     let adapterGenerationMessage: String?
@@ -28,14 +37,21 @@ struct SettingsSnapshot {
     let engineStatus: String
     let accessibilityStatus: String
     let browserBridgeStatus: String
+    let safariExtensionStatus: SafariExtensionStatus
+    let updateStatus: UpdateStatus
+    let firstRunComplete: Bool
+    let diagnostics: RuntimeDiagnosticSnapshot
 
     static func live(engine: ShortcutEngine) -> SettingsSnapshot {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "Unknown"
         let build = info?["CFBundleVersion"] as? String ?? "Unknown"
+        let diagnostics = engine.diagnosticSnapshot()
 
         return SettingsSnapshot(
-            shortcuts: CanonicalShortcut.defaults,
+            shortcuts: engine.shortcutProfile.shortcuts,
+            shortcutProfile: engine.shortcutProfile,
+            shortcutConflicts: engine.shortcutProfile.conflicts(),
             adapters: engine.registry.allAdapters,
             validationMessages: engine.registry.validationMessages,
             adapterGenerationMessage: engine.adapterGenerationMessage,
@@ -43,7 +59,11 @@ struct SettingsSnapshot {
             versionBuild: "\(version) (\(build))",
             engineStatus: engine.status.title,
             accessibilityStatus: ShortcutEngine.hasAccessibilityPermission ? "Granted" : "Not granted",
-            browserBridgeStatus: engine.browserBridge?.status.title ?? "Unavailable"
+            browserBridgeStatus: engine.browserBridge?.status.title ?? "Unavailable",
+            safariExtensionStatus: engine.safariExtensionStatus,
+            updateStatus: engine.updateStatus,
+            firstRunComplete: engine.isFirstRunComplete,
+            diagnostics: diagnostics
         )
     }
 }
@@ -52,18 +72,66 @@ struct SettingsActions {
     let generateForActiveApp: () -> Void
     let saveGeneratedAdapter: () -> Void
     let discardGeneratedAdapter: () -> Void
+    let markFirstRunComplete: () -> Void
+    let resetFirstRun: () -> Void
+    let setAutomaticUpdates: (Bool) -> Void
+    let checkForUpdates: () -> Void
+    let openSafariExtensionSettings: () -> Void
+    let exportSupportBundle: () -> Void
 
     static let noop = SettingsActions(
         generateForActiveApp: {},
         saveGeneratedAdapter: {},
-        discardGeneratedAdapter: {}
+        discardGeneratedAdapter: {},
+        markFirstRunComplete: {},
+        resetFirstRun: {},
+        setAutomaticUpdates: { _ in },
+        checkForUpdates: {},
+        openSafariExtensionSettings: {},
+        exportSupportBundle: {}
     )
 
     static func live(engine: ShortcutEngine) -> SettingsActions {
         SettingsActions(
             generateForActiveApp: { engine.generateAdapterForCurrentApp() },
             saveGeneratedAdapter: { engine.saveGeneratedAdapterPreview() },
-            discardGeneratedAdapter: { engine.discardGeneratedAdapterPreview() }
+            discardGeneratedAdapter: { engine.discardGeneratedAdapterPreview() },
+            markFirstRunComplete: { engine.markFirstRunComplete() },
+            resetFirstRun: { engine.resetFirstRunState() },
+            setAutomaticUpdates: { engine.setAutomaticUpdateChecksEnabled($0) },
+            checkForUpdates: {
+                engine.recordUpdateCheckResult(
+                    state: .failed,
+                    detail: "Sparkle is not bundled in this build yet; release packaging will enable this check."
+                )
+            },
+            openSafariExtensionSettings: {
+                SFSafariApplication.showPreferencesForExtension(
+                    withIdentifier: engine.safariExtensionStatus.bundleIdentifier
+                ) { error in
+                    if let error {
+                        DispatchQueue.main.async {
+                            engine.setSafariExtensionStatus(
+                                SafariExtensionStatus(
+                                    state: .needsAttention,
+                                    detail: "Could not open Safari extension settings: \(error.localizedDescription)"
+                                )
+                            )
+                        }
+                    }
+                }
+            },
+            exportSupportBundle: {
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = "shorty-support.json"
+                panel.allowedContentTypes = [.json]
+                guard panel.runModal() == .OK, let url = panel.url else { return }
+                do {
+                    try engine.exportSupportBundle(to: url)
+                } catch {
+                    engine.lastError = "Could not export support bundle: \(error.localizedDescription)"
+                }
+            }
         )
     }
 }
@@ -107,7 +175,7 @@ struct SettingsContentView: View {
     init(
         snapshot: SettingsSnapshot,
         actions: SettingsActions = .noop,
-        initialTab: SettingsTab = .shortcuts,
+        initialTab: SettingsTab = .setup,
         initialCategory: CanonicalShortcut.Category? = .navigation
     ) {
         self.snapshot = snapshot
@@ -118,10 +186,20 @@ struct SettingsContentView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
+            SettingsSetupTab(
+                snapshot: snapshot,
+                actions: actions
+            )
+            .tabItem {
+                Label("Setup", systemImage: "checklist")
+            }
+            .tag(SettingsTab.setup)
+
             SettingsShortcutsTab(
                 selectedCategory: $selectedCategory,
                 searchText: $shortcutSearch,
-                shortcuts: filteredShortcuts
+                shortcuts: filteredShortcuts,
+                conflicts: snapshot.shortcutConflicts
             )
             .tabItem {
                 Label("Shortcuts", systemImage: "command")
@@ -142,6 +220,35 @@ struct SettingsContentView: View {
             }
             .tag(SettingsTab.adapters)
 
+            SettingsBrowsersTab(
+                safariStatus: snapshot.safariExtensionStatus,
+                bridgeStatus: snapshot.browserBridgeStatus,
+                diagnostics: snapshot.diagnostics,
+                actions: actions
+            )
+            .tabItem {
+                Label("Browsers", systemImage: "safari")
+            }
+            .tag(SettingsTab.browsers)
+
+            SettingsUpdatesTab(
+                updateStatus: snapshot.updateStatus,
+                actions: actions
+            )
+            .tabItem {
+                Label("Updates", systemImage: "arrow.down.circle")
+            }
+            .tag(SettingsTab.updates)
+
+            SettingsDiagnosticsTab(
+                diagnostics: snapshot.diagnostics,
+                actions: actions
+            )
+            .tabItem {
+                Label("Diagnostics", systemImage: "waveform.path.ecg")
+            }
+            .tag(SettingsTab.diagnostics)
+
             SettingsAboutTab(
                 versionBuild: snapshot.versionBuild,
                 engineStatus: snapshot.engineStatus,
@@ -155,7 +262,75 @@ struct SettingsContentView: View {
             }
             .tag(SettingsTab.about)
         }
-        .frame(width: 720, height: 500)
+        .frame(minWidth: 760, idealWidth: 820, minHeight: 540, idealHeight: 620)
+    }
+}
+
+private struct SettingsSetupTab: View {
+    let snapshot: SettingsSnapshot
+    let actions: SettingsActions
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                ShortyPanel {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Release setup")
+                            .font(.headline)
+                        Text("Finish the local checks that make Shorty safe to leave running every day.")
+                            .foregroundColor(.secondary)
+                        SetupChecklistRow(
+                            title: "Accessibility",
+                            detail: "Required for shortcut translation and menu adapter generation.",
+                            isComplete: snapshot.accessibilityStatus == "Granted"
+                        )
+                        SetupChecklistRow(
+                            title: "Safari extension",
+                            detail: snapshot.safariExtensionStatus.detail,
+                            isComplete: snapshot.safariExtensionStatus.state == .enabled
+                        )
+                        SetupChecklistRow(
+                            title: "Browser bridge",
+                            detail: snapshot.browserBridgeStatus,
+                            isComplete: snapshot.browserBridgeStatus.contains("ready")
+                                || snapshot.browserBridgeStatus.contains("connected")
+                        )
+                        SetupChecklistRow(
+                            title: "First-run review",
+                            detail: snapshot.firstRunComplete ? "Marked complete." : "Review setup before relying on remapping.",
+                            isComplete: snapshot.firstRunComplete
+                        )
+                        HStack {
+                            Button("Mark Setup Complete", action: actions.markFirstRunComplete)
+                                .buttonStyle(.borderedProminent)
+                            Button("Reset Setup", action: actions.resetFirstRun)
+                        }
+                    }
+                }
+            }
+            .padding()
+        }
+    }
+}
+
+private struct SetupChecklistRow: View {
+    let title: String
+    let detail: String
+    let isComplete: Bool
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .fontWeight(.medium)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        } icon: {
+            Image(systemName: isComplete ? "checkmark.circle.fill" : "circle")
+                .foregroundColor(isComplete ? ShortyBrand.teal : .secondary)
+        }
     }
 }
 
@@ -164,11 +339,16 @@ private struct SettingsShortcutsTab: View {
     @Binding var searchText: String
 
     let shortcuts: [CanonicalShortcut]
+    let conflicts: [ShortcutConflict]
 
     var body: some View {
         HSplitView {
             SettingsCategoryList(selectedCategory: $selectedCategory)
-            SettingsShortcutList(searchText: $searchText, shortcuts: shortcuts)
+            SettingsShortcutList(
+                searchText: $searchText,
+                shortcuts: shortcuts,
+                conflicts: conflicts
+            )
         }
     }
 }
@@ -193,15 +373,150 @@ private struct SettingsShortcutList: View {
     @Binding var searchText: String
 
     let shortcuts: [CanonicalShortcut]
+    let conflicts: [ShortcutConflict]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             TextField("Search shortcuts", text: $searchText)
                 .textFieldStyle(.roundedBorder)
 
+            if !conflicts.isEmpty {
+                Label(
+                    "\(conflicts.count) shortcut review item\(conflicts.count == 1 ? "" : "s")",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundColor(ShortyBrand.amber)
+            }
+
             List(shortcuts) { shortcut in
                 SettingsShortcutRow(shortcut: shortcut)
             }
+        }
+        .padding()
+    }
+}
+
+private struct SettingsBrowsersTab: View {
+    let safariStatus: SafariExtensionStatus
+    let bridgeStatus: String
+    let diagnostics: RuntimeDiagnosticSnapshot
+    let actions: SettingsActions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ShortyPanel {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Safari")
+                        .font(.headline)
+                    SettingsInfoRow("Status", safariStatus.title)
+                    SettingsInfoRow("Extension ID", safariStatus.bundleIdentifier)
+                    SettingsInfoRow("Last domain", safariStatus.lastDomain ?? "None")
+                    Text(safariStatus.detail)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Button("Open Safari Extension Settings", action: actions.openSafariExtensionSettings)
+                }
+            }
+
+            ShortyPanel {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Chrome-family bridge")
+                        .font(.headline)
+                    SettingsInfoRow("Status", bridgeStatus)
+                    SettingsInfoRow("Browser source", diagnostics.browserContextSource.title)
+                    SettingsInfoRow("Web domain", diagnostics.webDomain ?? "None")
+                    Text("In-app install and uninstall will manage native messaging manifests for Chrome, Brave, Edge, Chromium, Vivaldi, and Chrome Canary.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Spacer()
+        }
+        .padding()
+    }
+}
+
+private struct SettingsUpdatesTab: View {
+    let updateStatus: UpdateStatus
+    let actions: SettingsActions
+
+    @State private var automaticChecksEnabled: Bool
+
+    init(updateStatus: UpdateStatus, actions: SettingsActions) {
+        self.updateStatus = updateStatus
+        self.actions = actions
+        _automaticChecksEnabled = State(initialValue: updateStatus.automaticChecksEnabled)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ShortyPanel {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(updateStatus.title)
+                        .font(.headline)
+                    Text(updateStatus.detail)
+                        .foregroundColor(.secondary)
+                    Toggle("Check for updates automatically", isOn: $automaticChecksEnabled)
+                        .onChange(of: automaticChecksEnabled) { nextValue in
+                            actions.setAutomaticUpdates(nextValue)
+                        }
+                    SettingsInfoRow("Last checked", formatted(updateStatus.lastCheckedAt))
+                    Button("Check for Updates", action: actions.checkForUpdates)
+                }
+            }
+            Spacer()
+        }
+        .padding()
+    }
+
+    private func formatted(_ date: Date?) -> String {
+        guard let date else { return "Never" }
+        return DateFormatter.localizedString(
+            from: date,
+            dateStyle: .medium,
+            timeStyle: .short
+        )
+    }
+}
+
+private struct SettingsDiagnosticsTab: View {
+    let diagnostics: RuntimeDiagnosticSnapshot
+    let actions: SettingsActions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ShortyPanel {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Runtime diagnostics")
+                        .font(.headline)
+                    SettingsInfoRow("Engine", diagnostics.engineStatus)
+                    SettingsInfoRow("Permission", diagnostics.permissionState.rawValue)
+                    SettingsInfoRow("Active app", diagnostics.currentAppName ?? "Unknown")
+                    SettingsInfoRow("Effective app", diagnostics.effectiveAppID ?? "None")
+                    SettingsInfoRow("Browser source", diagnostics.browserContextSource.title)
+                    SettingsInfoRow("Events intercepted", "\(diagnostics.eventsIntercepted)")
+                    SettingsInfoRow("Events remapped", "\(diagnostics.eventsRemapped)")
+                    Button("Export Support Bundle", action: actions.exportSupportBundle)
+                }
+            }
+
+            if !diagnostics.adapterValidationMessages.isEmpty {
+                ShortyPanel {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Adapter warnings")
+                            .font(.headline)
+                        ForEach(diagnostics.adapterValidationMessages, id: \.self) { message in
+                            Text(message)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Spacer()
         }
         .padding()
     }

@@ -21,12 +21,12 @@ local-first shortcut translation story, and pass static validation.
 
 - [x] Added a `ShortyScreenshots` command-line target to the Tuist project.
 - [x] Refactored Settings and menu bar status views into runtime wrappers plus
-      deterministic content views.
+  deterministic content views.
 - [x] Added an offscreen SwiftUI/AppKit renderer that writes native, web, and
-      App Store PNG exports.
+  App Store PNG exports.
 - [x] Added `just marketing-screenshots` and PNG dimension validation.
 - [x] Updated the static homepage to use product screenshots, local-first copy,
-      skip links, and visible focus states.
+  skip links, and visible focus states.
 - [x] Run final app, web, screenshot, and Python verification.
 
 ## Surprises & Discoveries

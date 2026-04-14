@@ -276,6 +276,12 @@ public final class AdapterRegistry: ObservableObject {
         loadAllAdapters()
     }
 
+    public func applyShortcutProfile(_ profile: UserShortcutProfile) {
+        canonicalShortcuts = profile.shortcuts
+        rebuildComboIndex()
+        rebuildActionIndex()
+    }
+
     // MARK: - Loading
 
     private func loadAllAdapters() {

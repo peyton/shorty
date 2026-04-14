@@ -66,6 +66,8 @@ If the bridge does not connect, check that:
 
 - Shorty is running.
 - The extension ID matches the native messaging manifest.
+- The helper exists at
+  `~/Library/Application Support/Shorty/BrowserBridge/shorty-bridge`.
 - The selected browser has the manifest under its Application Support native
   messaging directory.
 - The active tab is one of the supported web app domains.

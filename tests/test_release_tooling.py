@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.tooling.app_store_validate import validate_app_store_candidate
+from scripts.tooling.appcast_generate import AppcastGenerateError, generate_appcast
 from scripts.tooling.browser_manifest import (
     HOST_NAME,
     BrowserManifestError,
@@ -25,6 +27,8 @@ from scripts.tooling.release_preflight import (
     check_signing_identity,
     check_xcode_is_stable,
 )
+from scripts.tooling.release_verify import verify_release
+from scripts.tooling.safari_extension_verify import verify_safari_extension
 
 
 def make_fake_app(root: Path, version: str = "1.0.0") -> Path:
@@ -44,6 +48,41 @@ def make_fake_app(root: Path, version: str = "1.0.0") -> Path:
         )
     )
     return app
+
+
+def add_fake_safari_extension(
+    app: Path,
+    bundle_name: str = "ShortySafariWebExtension.appex",
+    bundle_id: str = "app.peyton.shorty.SafariWebExtension",
+) -> Path:
+    extension = app / "Contents" / "PlugIns" / bundle_name
+    resources = extension / "Contents" / "Resources"
+    resources.mkdir(parents=True)
+    (extension / "Contents" / "MacOS").mkdir()
+    (extension / "Contents" / "Info.plist").write_bytes(
+        plistlib.dumps(
+            {
+                "CFBundleExecutable": "ShortySafariWebExtension",
+                "CFBundleIdentifier": bundle_id,
+                "CFBundleShortVersionString": "1.0.0",
+                "CFBundleVersion": "1",
+                "NSExtension": {
+                    "NSExtensionPointIdentifier": "com.apple.Safari.web-extension",
+                    "NSExtensionPrincipalClass": (
+                        "ShortySafariWebExtension.SafariWebExtensionHandler"
+                    ),
+                },
+            }
+        )
+    )
+    (resources / "manifest.json").write_text(
+        (
+            '{"manifest_version":3,"permissions":["nativeMessaging"],'
+            '"background":{"service_worker":"background.js"}}\n'
+        ),
+        encoding="utf-8",
+    )
+    return extension
 
 
 def test_app_package_creates_deterministic_zip_and_checksum(tmp_path: Path) -> None:
@@ -118,7 +157,11 @@ def assert_zip_entry_is_symlink(
 
 def test_release_preflight_rejects_beta_xcode_without_override() -> None:
     with pytest.raises(ReleasePreflightError, match="stable Xcode"):
-        check_xcode_is_stable("Xcode 26.5\nBuild version 17F5012f Beta", False)
+        check_xcode_is_stable(
+            "Xcode 26.5\nBuild version 17F5012f",
+            False,
+            developer_dir="/Applications/Xcode-26.5.0-Beta.app/Contents/Developer",
+        )
 
     check_xcode_is_stable("Xcode 26.5\nBuild version 17F5012f Beta", True)
 
@@ -176,3 +219,73 @@ def test_browser_manifest_payload_uses_resolved_bridge_path(tmp_path: Path) -> N
 
     assert payload["path"] == str(bridge_path.resolve())
     assert payload["allowed_origins"] == [f"chrome-extension://{extension_id}/"]
+
+
+def test_safari_extension_verify_requires_bundled_extension(tmp_path: Path) -> None:
+    app = make_fake_app(tmp_path)
+    extension = add_fake_safari_extension(app)
+
+    result = verify_safari_extension(app, require_codesign=False)
+
+    assert result.extension_path == extension
+    assert result.bundle_identifier == "app.peyton.shorty.SafariWebExtension"
+    assert result.manifest_version == 3
+
+
+def test_release_verify_checks_archive_checksum_and_extension(tmp_path: Path) -> None:
+    app = make_fake_app(tmp_path)
+    add_fake_safari_extension(app)
+    packaged = package_app(app, "1.0.0", tmp_path / "releases")
+
+    result = verify_release(
+        version="1.0.0",
+        archive_path=packaged.archive_path,
+        checksum_path=packaged.checksum_path,
+    )
+
+    assert result.version == "1.0.0"
+    assert result.digest == packaged.digest
+
+
+def test_appcast_generation_requires_signature_unless_allowed(tmp_path: Path) -> None:
+    app = make_fake_app(tmp_path)
+    packaged = package_app(app, "1.0.0", tmp_path / "releases")
+
+    with pytest.raises(AppcastGenerateError, match="EdDSA signature"):
+        generate_appcast(
+            version="1.0.0",
+            archive_path=packaged.archive_path,
+            download_url="https://example.com/shorty.zip",
+            output_path=tmp_path / "appcast.xml",
+            ed_signature=None,
+        )
+
+    output = generate_appcast(
+        version="1.0.0",
+        archive_path=packaged.archive_path,
+        download_url="https://example.com/shorty.zip",
+        output_path=tmp_path / "appcast.xml",
+        ed_signature=None,
+        allow_unsigned=True,
+    )
+
+    assert output.read_text(encoding="utf-8").startswith("<?xml")
+
+
+def test_app_store_candidate_validation_checks_sandbox_and_extension(
+    tmp_path: Path,
+) -> None:
+    app = make_fake_app(tmp_path)
+    add_fake_safari_extension(
+        app,
+        bundle_name="ShortyAppStoreSafariWebExtension.appex",
+        bundle_id="app.peyton.shorty.appstore.SafariWebExtension",
+    )
+    info_path = app / "Contents" / "Info.plist"
+    info = plistlib.loads(info_path.read_bytes())
+    info["CFBundleIdentifier"] = "app.peyton.shorty.appstore"
+    info_path.write_bytes(plistlib.dumps(info))
+    entitlements = tmp_path / "ShortyAppStore.entitlements"
+    entitlements.write_bytes(plistlib.dumps({"com.apple.security.app-sandbox": True}))
+
+    validate_app_store_candidate(app, entitlements)

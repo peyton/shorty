@@ -28,7 +28,7 @@ public struct EngineConfiguration: Equatable {
     public static let releaseDefault = EngineConfiguration()
 }
 
-public enum PermissionState: Equatable {
+public enum PermissionState: String, Codable, Equatable {
     case unknown
     case granted
     case notGranted
