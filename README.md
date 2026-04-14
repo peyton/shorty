@@ -116,13 +116,16 @@ Release:
 
 - `just release-preflight VERSION=1.0.0` - verify a clean public release state.
 - `just app-package VERSION=1.0.0` - build, sign, zip, and checksum the app under `.build/releases/`.
+- `just app-package VERSION=1.0.0 ARTIFACT_LABEL=preview-<sha>` - build a preview archive whose bundled app still reports SemVer `1.0.0`.
 - `just app-notarize VERSION=1.0.0` - submit the app archive to Apple notarization, staple the app, and repackage it.
 - `just dmg-package VERSION=1.0.0` - create a DMG with `Shorty.app` and an Applications shortcut.
 - `just safari-extension-verify` - verify the built app contains the Safari Web Extension bundle and manifest.
 - `just release-verify VERSION=1.0.0` - verify the zip, checksum, bundle version, and Safari extension contents.
 - `just appcast-generate VERSION=1.0.0 DOWNLOAD_URL=<url>` - generate a Sparkle appcast from the signed zip. Requires `SHORTY_SPARKLE_ED_SIGNATURE` for release use.
-- `just app-store-build` - build the sandboxed App Store candidate target.
-- `just app-store-validate` - verify the App Store candidate bundle composition and sandbox entitlement.
+- `just app-store-build VERSION=1.0.0 BUILD_NUMBER=123` - build the sandboxed App Store candidate target with TestFlight-compatible version metadata.
+- `just app-store-validate VERSION=1.0.0 BUILD_NUMBER=123` - verify the App Store candidate bundle composition, sandbox entitlement, Safari extension, SemVer, and numeric Apple build number.
+- `just app-store-archive VERSION=1.0.0 BUILD_NUMBER=123` - create a signed App Store `.xcarchive`. Requires explicit local signing or App Store Connect API credentials.
+- `just app-store-export-testflight VERSION=1.0.0 BUILD_NUMBER=123` - upload the signed archive to App Store Connect for internal TestFlight testing. Requires App Store Connect API credentials.
 - `just release VERSION=1.0.0` - run the strict Developer ID release lane: preflight, packaging, notarization, DMG, and strict verification. Use `LANE=app-store-candidate` for the secondary App Store candidate build.
 
 Web:
@@ -157,6 +160,8 @@ Repository:
 
 ## Release Notes
 
-Direct-download app archives are created under `.build/releases/` as `shorty-<version>-macos.zip` with a matching `.sha256` file. Public `just release` lanes require Developer ID signing, Apple notarization credentials, stapling, and strict verification; local `just app-package` builds can still use ad-hoc signing for development.
+Direct-download app archives are created under `.build/releases/` as `shorty-<version>-macos.zip` with a matching `.sha256` file. Public `just release` lanes require Developer ID signing, Apple notarization credentials, stapling, and strict verification; local `just app-package` builds can still use ad-hoc signing for development. Preview releases use non-SemVer labels such as `preview-abcdef012345` for GitHub tags and archive names while the app bundle continues to report the root `VERSION` SemVer.
+
+The sandboxed App Store candidate keeps TestFlight metadata separate from preview labels. `CFBundleShortVersionString` must match the root `VERSION` value, and `CFBundleVersion` must be a positive numeric build number that increases for each App Store Connect upload. To use the upload lane, set `SHORTY_APP_STORE_CONNECT_KEY_PATH`, `SHORTY_APP_STORE_CONNECT_KEY_ID`, and `SHORTY_APP_STORE_CONNECT_ISSUER_ID`. To archive with already-installed local signing assets instead, set `SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING=1`.
 
 Generated menu-introspection adapters are disabled by default for public release. Users can generate, preview, and save an adapter explicitly from Settings.

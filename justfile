@@ -36,8 +36,8 @@ release-preflight VERSION='local':
     version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/release_preflight.sh --version "$version"
 
 [group('release')]
-app-package VERSION='local':
-    version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/app_package.sh --version "$version"
+app-package VERSION='local' ARTIFACT_LABEL='':
+    version="{{VERSION}}"; version="${version#VERSION=}"; artifact_label="{{ARTIFACT_LABEL}}"; artifact_label="${artifact_label#ARTIFACT_LABEL=}"; if [ -n "$artifact_label" ]; then bash scripts/tooling/app_package.sh --version "$version" --artifact-label "$artifact_label"; else bash scripts/tooling/app_package.sh --version "$version"; fi
 
 [group('release')]
 app-notarize VERSION='local':
@@ -48,8 +48,8 @@ dmg-package VERSION='local':
     version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/dmg_package.sh --version "$version"
 
 [group('release')]
-release-verify VERSION='local':
-    version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/release_verify.sh --version "$version"
+release-verify VERSION='local' ARTIFACT_LABEL='':
+    version="{{VERSION}}"; version="${version#VERSION=}"; artifact_label="{{ARTIFACT_LABEL}}"; artifact_label="${artifact_label#ARTIFACT_LABEL=}"; if [ -n "$artifact_label" ]; then bash scripts/tooling/release_verify.sh --version "$version" --artifact-label "$artifact_label"; else bash scripts/tooling/release_verify.sh --version "$version"; fi
 
 [group('release')]
 safari-extension-verify:
@@ -60,20 +60,28 @@ appcast-generate VERSION='local' DOWNLOAD_URL='':
     version="{{VERSION}}"; version="${version#VERSION=}"; download_url="{{DOWNLOAD_URL}}"; download_url="${download_url#DOWNLOAD_URL=}"; bash scripts/tooling/appcast_generate.sh --version "$version" --download-url "$download_url"
 
 [group('release')]
-app-store-build:
-    bash scripts/tooling/app_store_build.sh
+app-store-build VERSION='' BUILD_NUMBER='1':
+    version="{{VERSION}}"; version="${version#VERSION=}"; build_number="{{BUILD_NUMBER}}"; build_number="${build_number#BUILD_NUMBER=}"; if [ -n "$version" ]; then bash scripts/tooling/app_store_build.sh --version "$version" --build-number "$build_number"; else bash scripts/tooling/app_store_build.sh --build-number "$build_number"; fi
 
 [group('release')]
-app-store-validate:
-    bash scripts/tooling/app_store_validate.sh
+app-store-validate VERSION='' BUILD_NUMBER='':
+    version="{{VERSION}}"; version="${version#VERSION=}"; build_number="{{BUILD_NUMBER}}"; build_number="${build_number#BUILD_NUMBER=}"; if [ -n "$version" ] && [ -n "$build_number" ]; then bash scripts/tooling/app_store_validate.sh --version "$version" --build-number "$build_number"; elif [ -n "$version" ]; then bash scripts/tooling/app_store_validate.sh --version "$version"; elif [ -n "$build_number" ]; then bash scripts/tooling/app_store_validate.sh --build-number "$build_number"; else bash scripts/tooling/app_store_validate.sh; fi
+
+[group('release')]
+app-store-archive VERSION BUILD_NUMBER:
+    version="{{VERSION}}"; version="${version#VERSION=}"; build_number="{{BUILD_NUMBER}}"; build_number="${build_number#BUILD_NUMBER=}"; bash scripts/tooling/app_store_archive.sh --version "$version" --build-number "$build_number"
+
+[group('release')]
+app-store-export-testflight VERSION BUILD_NUMBER:
+    version="{{VERSION}}"; version="${version#VERSION=}"; build_number="{{BUILD_NUMBER}}"; build_number="${build_number#BUILD_NUMBER=}"; bash scripts/tooling/app_store_export_testflight.sh --version "$version" --build-number "$build_number"
 
 [group('release')]
 profile-energy PROFILE='idle':
     profile="{{PROFILE}}"; profile="${profile#PROFILE=}"; bash scripts/tooling/energy_profile.sh "$profile"
 
 [group('release')]
-release VERSION='local' LANE='developer-id-with-safari':
-    version="{{VERSION}}"; version="${version#VERSION=}"; lane="{{LANE}}"; lane="${lane#LANE=}"; bash scripts/tooling/release_lane.sh --version "$version" --lane "$lane"
+release VERSION='local' LANE='developer-id-with-safari' BUILD_NUMBER='1':
+    version="{{VERSION}}"; version="${version#VERSION=}"; lane="{{LANE}}"; lane="${lane#LANE=}"; build_number="{{BUILD_NUMBER}}"; build_number="${build_number#BUILD_NUMBER=}"; bash scripts/tooling/release_lane.sh --version "$version" --lane "$lane" --build-number "$build_number"
 
 [group('web')]
 web-serve PORT='8000':

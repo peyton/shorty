@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from scripts.tooling.app_store_validate import validate_app_store_candidate
+from scripts.tooling.app_store_validate import (
+    AppStoreValidationError,
+    validate_app_store_candidate,
+)
 from scripts.tooling.appcast_generate import AppcastGenerateError, generate_appcast
 from scripts.tooling.browser_manifest import (
     HOST_NAME,
@@ -29,9 +32,20 @@ from scripts.tooling.release_preflight import (
 )
 from scripts.tooling.release_verify import verify_release
 from scripts.tooling.safari_extension_verify import verify_safari_extension
+from scripts.tooling.versioning import (
+    VersionError,
+    preview_label_for_sha,
+    validate_app_version,
+    validate_apple_build_number,
+    validate_artifact_label,
+)
 
 
-def make_fake_app(root: Path, version: str = "1.0.0") -> Path:
+def make_fake_app(
+    root: Path,
+    version: str = "1.0.0",
+    build_number: str = "1",
+) -> Path:
     app = root / "Shorty.app"
     contents = app / "Contents"
     macos = contents / "MacOS"
@@ -43,7 +57,7 @@ def make_fake_app(root: Path, version: str = "1.0.0") -> Path:
                 "CFBundleExecutable": "Shorty",
                 "CFBundleIdentifier": "app.peyton.shorty",
                 "CFBundleShortVersionString": version,
-                "CFBundleVersion": "1",
+                "CFBundleVersion": build_number,
             }
         )
     )
@@ -54,6 +68,8 @@ def add_fake_safari_extension(
     app: Path,
     bundle_name: str = "ShortySafariWebExtension.appex",
     bundle_id: str = "app.peyton.shorty.SafariWebExtension",
+    version: str = "1.0.0",
+    build_number: str = "1",
 ) -> Path:
     extension = app / "Contents" / "PlugIns" / bundle_name
     resources = extension / "Contents" / "Resources"
@@ -64,8 +80,8 @@ def add_fake_safari_extension(
             {
                 "CFBundleExecutable": "ShortySafariWebExtension",
                 "CFBundleIdentifier": bundle_id,
-                "CFBundleShortVersionString": "1.0.0",
-                "CFBundleVersion": "1",
+                "CFBundleShortVersionString": version,
+                "CFBundleVersion": build_number,
                 "NSExtension": {
                     "NSExtensionPointIdentifier": "com.apple.Safari.web-extension",
                     "NSExtensionPrincipalClass": (
@@ -83,6 +99,23 @@ def add_fake_safari_extension(
         encoding="utf-8",
     )
     return extension
+
+
+def test_versioning_validates_semver_build_numbers_and_preview_labels() -> None:
+    assert validate_app_version("1.0.0") == "1.0.0"
+    assert validate_apple_build_number("123") == "123"
+    assert (
+        preview_label_for_sha("ABCDEF0123456789abcdef0123456789abcdef01")
+        == "preview-abcdef012345"
+    )
+    assert validate_artifact_label("preview-test", "1.0.0") == "preview-test"
+
+    with pytest.raises(VersionError, match="MAJOR.MINOR.PATCH"):
+        validate_app_version("1.0.0-preview")
+    with pytest.raises(VersionError, match="positive numeric"):
+        validate_apple_build_number("0")
+    with pytest.raises(VersionError, match="Preview artifact labels"):
+        validate_artifact_label("nightly", "1.0.0")
 
 
 def test_app_package_creates_deterministic_zip_and_checksum(tmp_path: Path) -> None:
@@ -103,6 +136,26 @@ def test_app_package_creates_deterministic_zip_and_checksum(tmp_path: Path) -> N
     with zipfile.ZipFile(first.archive_path) as archive:
         assert "Shorty.app/" in archive.namelist()
         assert "Shorty.app/Contents/Info.plist" in archive.namelist()
+
+
+def test_app_package_uses_preview_artifact_label_without_changing_bundle(
+    tmp_path: Path,
+) -> None:
+    app = make_fake_app(tmp_path, version="1.0.0", build_number="123")
+
+    result = package_app(
+        app,
+        "1.0.0",
+        tmp_path / "releases",
+        artifact_label="preview-test",
+    )
+
+    assert result.archive_path.name == "shorty-preview-test-macos.zip"
+    assert result.checksum_path.name == "shorty-preview-test-macos.zip.sha256"
+    with zipfile.ZipFile(result.archive_path) as archive:
+        info = plistlib.loads(archive.read("Shorty.app/Contents/Info.plist"))
+    assert info["CFBundleShortVersionString"] == "1.0.0"
+    assert info["CFBundleVersion"] == "123"
 
 
 def test_app_package_rejects_version_mismatch(tmp_path: Path) -> None:
@@ -275,11 +328,13 @@ def test_appcast_generation_requires_signature_unless_allowed(tmp_path: Path) ->
 def test_app_store_candidate_validation_checks_sandbox_and_extension(
     tmp_path: Path,
 ) -> None:
-    app = make_fake_app(tmp_path)
+    app = make_fake_app(tmp_path, version="1.0.0", build_number="123")
     add_fake_safari_extension(
         app,
         bundle_name="ShortyAppStoreSafariWebExtension.appex",
         bundle_id="app.peyton.shorty.appstore.SafariWebExtension",
+        version="1.0.0",
+        build_number="123",
     )
     info_path = app / "Contents" / "Info.plist"
     info = plistlib.loads(info_path.read_bytes())
@@ -288,4 +343,35 @@ def test_app_store_candidate_validation_checks_sandbox_and_extension(
     entitlements = tmp_path / "ShortyAppStore.entitlements"
     entitlements.write_bytes(plistlib.dumps({"com.apple.security.app-sandbox": True}))
 
-    validate_app_store_candidate(app, entitlements)
+    validate_app_store_candidate(
+        app,
+        entitlements,
+        expected_version="1.0.0",
+        expected_build_number="123",
+    )
+
+
+def test_app_store_candidate_validation_rejects_bad_build_number(
+    tmp_path: Path,
+) -> None:
+    app = make_fake_app(tmp_path, version="1.0.0", build_number="preview-test")
+    add_fake_safari_extension(
+        app,
+        bundle_name="ShortyAppStoreSafariWebExtension.appex",
+        bundle_id="app.peyton.shorty.appstore.SafariWebExtension",
+        version="1.0.0",
+        build_number="preview-test",
+    )
+    info_path = app / "Contents" / "Info.plist"
+    info = plistlib.loads(info_path.read_bytes())
+    info["CFBundleIdentifier"] = "app.peyton.shorty.appstore"
+    info_path.write_bytes(plistlib.dumps(info))
+    entitlements = tmp_path / "ShortyAppStore.entitlements"
+    entitlements.write_bytes(plistlib.dumps({"com.apple.security.app-sandbox": True}))
+
+    with pytest.raises(AppStoreValidationError, match="build number"):
+        validate_app_store_candidate(
+            app,
+            entitlements,
+            expected_version="1.0.0",
+        )

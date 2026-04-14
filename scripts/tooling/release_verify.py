@@ -12,7 +12,12 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts.tooling.package_app import DEFAULT_OUTPUT_DIR, validate_package_version
+from scripts.tooling.package_app import (
+    DEFAULT_OUTPUT_DIR,
+    AppPackageError,
+    validate_package_label,
+    validate_package_version,
+)
 from scripts.tooling.safari_extension_verify import (
     SafariExtensionVerificationError,
     verify_safari_extension,
@@ -109,11 +114,13 @@ def verify_release(
     version: str,
     archive_path: Path,
     checksum_path: Path,
+    artifact_label: str | None = None,
     require_codesign: bool = False,
     require_gatekeeper: bool = False,
     require_staple: bool = False,
 ) -> ReleaseVerificationResult:
     normalized_version = validate_package_version(version)
+    validate_package_label(artifact_label or normalized_version, normalized_version)
     digest = verify_checksum(archive_path, checksum_path)
 
     temp_dir = Path(tempfile.mkdtemp(prefix="shorty-release-verify-"))
@@ -156,6 +163,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify Shorty release artifacts.")
     parser.add_argument("--version", required=True)
     parser.add_argument(
+        "--artifact-label",
+        help="Artifact label used in the default archive path.",
+    )
+    parser.add_argument(
         "--archive-path",
         help="Release zip path. Defaults to .build/releases/shorty-VERSION-macos.zip.",
     )
@@ -168,28 +179,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--require-staple", action="store_true")
     args = parser.parse_args(argv)
 
-    version = validate_package_version(args.version)
-    archive_path = (
-        Path(args.archive_path)
-        if args.archive_path
-        else (DEFAULT_OUTPUT_DIR / f"shorty-{version}-macos.zip")
-    )
-    checksum_path = (
-        Path(args.checksum_path)
-        if args.checksum_path
-        else (archive_path.with_name(f"{archive_path.name}.sha256"))
-    )
-
     try:
+        version = validate_package_version(args.version)
+        artifact_label = validate_package_label(args.artifact_label or version, version)
+        archive_path = (
+            Path(args.archive_path)
+            if args.archive_path
+            else (DEFAULT_OUTPUT_DIR / f"shorty-{artifact_label}-macos.zip")
+        )
+        checksum_path = (
+            Path(args.checksum_path)
+            if args.checksum_path
+            else (archive_path.with_name(f"{archive_path.name}.sha256"))
+        )
         result = verify_release(
             version=version,
             archive_path=archive_path,
             checksum_path=checksum_path,
+            artifact_label=artifact_label,
             require_codesign=args.require_codesign,
             require_gatekeeper=args.require_gatekeeper,
             require_staple=args.require_staple,
         )
     except (
+        AppPackageError,
         ReleaseVerificationError,
         SafariExtensionVerificationError,
         subprocess.CalledProcessError,
