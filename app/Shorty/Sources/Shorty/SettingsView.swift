@@ -211,7 +211,10 @@ struct SettingsSnapshot {
         let diagnostics = engine.diagnosticSnapshot()
         let appSnapshot = engine.appMonitor.snapshot()
         let appID = appSnapshot.effectiveAppID
-        let activeAppName = Self.activeContextTitle(engine: engine, appID: appID)
+        let activeAppName = Self.activeContextTitle(
+            engine: engine,
+            appSnapshot: appSnapshot
+        )
 
         return SettingsSnapshot(
             shortcuts: engine.shortcutProfile.shortcuts,
@@ -252,11 +255,11 @@ struct SettingsSnapshot {
 
     private static func activeContextTitle(
         engine: ShortcutEngine,
-        appID: String?
+        appSnapshot: AppMonitor.Snapshot
     ) -> String {
-        let appName = engine.appMonitor.currentAppName ?? "Unknown"
-        guard let domain = engine.appMonitor.webAppDomain,
-              let appID,
+        let appName = appSnapshot.currentAppName ?? "Unknown"
+        guard let domain = appSnapshot.webAppDomain,
+              let appID = appSnapshot.effectiveAppID,
               appID.hasPrefix("web:")
         else {
             return appName

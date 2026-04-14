@@ -1,16 +1,28 @@
 import AppKit
+import Combine
 import ShortyCore
 import SwiftUI
 
 struct StatusBarView: View {
-    @ObservedObject var engine: ShortcutEngine
+    @StateObject private var snapshotStore: StatusBarSnapshotStore
+    private let engine: ShortcutEngine
+
+    init(engine: ShortcutEngine) {
+        self.engine = engine
+        _snapshotStore = StateObject(
+            wrappedValue: StatusBarSnapshotStore(engine: engine)
+        )
+    }
 
     var body: some View {
         StatusBarContentView(
-            snapshot: .live(engine: engine),
+            snapshot: snapshotStore.snapshot,
             eventTapEnabled: eventTapEnabledBinding,
             actions: .live(engine: engine)
         )
+        .onAppear {
+            snapshotStore.refreshFromFrontmostApplication()
+        }
     }
 
     private var eventTapEnabledBinding: Binding<Bool> {
@@ -18,6 +30,111 @@ struct StatusBarView: View {
             get: { engine.eventTap.isEnabled },
             set: { engine.eventTap.isEnabled = $0 }
         )
+    }
+}
+
+final class StatusBarSnapshotStore: ObservableObject {
+    @Published private(set) var snapshot: StatusBarSnapshot
+
+    private let engine: ShortcutEngine
+    private var cancellables = Set<AnyCancellable>()
+    private var refreshScheduled = false
+
+    init(engine: ShortcutEngine) {
+        self.engine = engine
+        self.snapshot = StatusBarSnapshot.live(engine: engine)
+        bind()
+    }
+
+    func refreshFromFrontmostApplication() {
+        engine.appMonitor.refreshActiveApplication()
+        engine.refreshDailyStatuses()
+        refresh()
+    }
+
+    private func bind() {
+        observe(engine.$status) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$permissionState) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$isWaitingForAccessibilityPermission) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$safariExtensionStatus) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$shortcutProfile) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$generatedAdapterPreview) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$adapterGenerationMessage) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+
+        observe(engine.appMonitor.$currentBundleID) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.appMonitor.$currentAppName) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.appMonitor.$webAppDomain) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.appMonitor.$browserContextSource) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+
+        observe(engine.registry.$adapters) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.registry.$validationMessages) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+
+        observe(engine.eventTap.$isEnabled) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.eventTap.$counters) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.eventTap.$lifecycleMessage) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+
+        if let browserBridge = engine.browserBridge {
+            observe(browserBridge.$status) { [weak self] _ in
+                self?.scheduleRefresh()
+            }
+        }
+    }
+
+    private func observe<P: Publisher>(
+        _ publisher: P,
+        receiveValue: @escaping (P.Output) -> Void
+    ) where P.Failure == Never {
+        publisher
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink(receiveValue: receiveValue)
+            .store(in: &cancellables)
+    }
+
+    private func scheduleRefresh() {
+        guard !refreshScheduled else { return }
+        refreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.refreshScheduled = false
+            self.refresh()
+        }
+    }
+
+    private func refresh() {
+        snapshot = StatusBarSnapshot.live(engine: engine)
     }
 }
 
@@ -65,7 +182,10 @@ struct StatusBarSnapshot {
     static func live(engine: ShortcutEngine) -> StatusBarSnapshot {
         let appSnapshot = engine.appMonitor.snapshot()
         let appID = appSnapshot.effectiveAppID
-        let activeTitle = activeContextTitle(engine: engine, appID: appID)
+        let activeTitle = activeContextTitle(
+            engine: engine,
+            appSnapshot: appSnapshot
+        )
         let availability = engine.registry.availability(
             for: appID,
             displayName: activeTitle
@@ -112,11 +232,11 @@ struct StatusBarSnapshot {
 
     private static func activeContextTitle(
         engine: ShortcutEngine,
-        appID: String?
+        appSnapshot: AppMonitor.Snapshot
     ) -> String {
-        let appName = engine.appMonitor.currentAppName ?? "Unknown"
-        guard let domain = engine.appMonitor.webAppDomain,
-              let appID,
+        let appName = appSnapshot.currentAppName ?? "Unknown"
+        guard let domain = appSnapshot.webAppDomain,
+              let appID = appSnapshot.effectiveAppID,
               appID.hasPrefix("web:")
         else {
             return appName
@@ -194,11 +314,20 @@ struct StatusBarContentView: View {
         _showsDetails = State(initialValue: showsDetails)
     }
 
+    var contentPresentation: StatusBarContentPresentation {
+        StatusBarContentPresentation(snapshot: snapshot)
+    }
+
     var body: some View {
+        let presentation = contentPresentation
+
         VStack(alignment: .leading, spacing: 14) {
             StatusHeader(snapshot: snapshot)
             PermissionBanner(snapshot: snapshot, actions: actions)
-            AvailableShortcutsSection(snapshot: snapshot, actions: actions)
+            AvailableShortcutsSection(
+                presentation: presentation.shortcuts,
+                actions: actions
+            )
             TranslationControlSection(
                 snapshot: snapshot,
                 eventTapEnabled: eventTapEnabled
@@ -209,6 +338,18 @@ struct StatusBarContentView: View {
         .padding(16)
         .frame(width: 430)
         .accessibilityIdentifier("status-popover")
+    }
+}
+
+struct StatusBarContentPresentation: Equatable {
+    let statusTitle: String
+    let activeContextTitle: String
+    let shortcuts: StatusBarShortcutsPresentation
+
+    init(snapshot: StatusBarSnapshot) {
+        self.statusTitle = snapshot.status.title
+        self.activeContextTitle = snapshot.activeContextTitle
+        self.shortcuts = StatusBarShortcutsPresentation(snapshot: snapshot)
     }
 }
 
@@ -331,8 +472,83 @@ private struct PermissionBanner: View {
     }
 }
 
+struct StatusBarShortcutsPresentation: Equatable {
+    let title: String
+    let coverageDetail: String
+    let rows: [ShortcutRowPresentation]
+    let emptyState: EmptyShortcutStatePresentation?
+    let showsPauseActions: Bool
+    let showsResumeAction: Bool
+    let adapterGenerationMessage: String?
+    let hasGeneratedAdapterPreview: Bool
+
+    init(snapshot: StatusBarSnapshot) {
+        self.title = "Available now"
+        self.coverageDetail = snapshot.availability.coverageDetail
+        self.adapterGenerationMessage = snapshot.adapterGenerationMessage
+        self.hasGeneratedAdapterPreview = snapshot.hasGeneratedAdapterPreview
+
+        switch snapshot.availability.state {
+        case .available:
+            self.rows = snapshot.availability.shortcuts.map(ShortcutRowPresentation.init)
+            self.emptyState = nil
+            self.showsPauseActions = true
+            self.showsResumeAction = false
+        case .paused:
+            self.rows = []
+            self.emptyState = EmptyShortcutStatePresentation(
+                title: "Paused for this app",
+                detail: "Shorty is passing keys through for this app.",
+                showsAddButton: false
+            )
+            self.showsPauseActions = false
+            self.showsResumeAction = true
+        case .noActiveApp:
+            self.rows = []
+            self.emptyState = EmptyShortcutStatePresentation(
+                title: "No app selected",
+                detail: "Click into an app and Shorty will show its shortcuts here.",
+                showsAddButton: false
+            )
+            self.showsPauseActions = false
+            self.showsResumeAction = false
+        case .noAdapter:
+            self.rows = []
+            self.emptyState = EmptyShortcutStatePresentation(
+                title: "No shortcuts for this app yet",
+                detail: "Shorty will pass keys through until you add support for this app.",
+                showsAddButton: !snapshot.requiresPermission
+            )
+            self.showsPauseActions = false
+            self.showsResumeAction = false
+        }
+    }
+}
+
+struct ShortcutRowPresentation: Equatable, Identifiable {
+    let id: String
+    let name: String
+    let defaultKeys: String
+    let actionDescription: String
+    let actionKind: AvailableShortcutActionKind
+
+    init(shortcut: AvailableShortcut) {
+        self.id = shortcut.id
+        self.name = shortcut.name
+        self.defaultKeys = shortcut.defaultKeys.displayString
+        self.actionDescription = shortcut.actionDescription
+        self.actionKind = shortcut.actionKind
+    }
+}
+
+struct EmptyShortcutStatePresentation: Equatable {
+    let title: String
+    let detail: String
+    let showsAddButton: Bool
+}
+
 private struct AvailableShortcutsSection: View {
-    let snapshot: StatusBarSnapshot
+    let presentation: StatusBarShortcutsPresentation
     let actions: StatusBarActions
 
     var body: some View {
@@ -340,9 +556,9 @@ private struct AvailableShortcutsSection: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Available now")
+                        Text(presentation.title)
                             .font(.callout.weight(.semibold))
-                        Text(snapshot.availability.coverageDetail)
+                        Text(presentation.coverageDetail)
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -350,43 +566,31 @@ private struct AvailableShortcutsSection: View {
                     Spacer()
                 }
 
-                switch snapshot.availability.state {
-                case .available:
-                    ShortcutList(shortcuts: snapshot.availability.shortcuts)
+                if !presentation.rows.isEmpty {
+                    ShortcutList(shortcuts: presentation.rows)
+                }
+
+                if presentation.showsPauseActions {
                     HStack(spacing: 8) {
                         Button("Pause This App", action: actions.pauseCurrentApp)
                         Button("Pause 15 Min", action: actions.pauseFor15Minutes)
                     }
                     .controlSize(.small)
-                case .paused:
-                    EmptyShortcutState(
-                        title: "Paused for this app",
-                        detail: "Shorty is passing keys through for this app.",
-                        showsAddButton: false,
-                        actions: actions
-                    )
-                    Button("Resume This App", action: actions.resumeCurrentApp)
-                        .controlSize(.small)
-                case .noActiveApp:
-                    EmptyShortcutState(
-                        title: "No app selected",
-                        detail: "Click into an app and Shorty will show its shortcuts here.",
-                        showsAddButton: false,
-                        actions: actions
-                    )
-                case .noAdapter:
-                    EmptyShortcutState(
-                        title: "No shortcuts for this app yet",
-                        detail: "Shorty will pass keys through until you add support for this app.",
-                        showsAddButton: !snapshot.requiresPermission,
-                        actions: actions
-                    )
                 }
 
-                if let message = snapshot.adapterGenerationMessage {
+                if let emptyState = presentation.emptyState {
+                    EmptyShortcutState(presentation: emptyState, actions: actions)
+                }
+
+                if presentation.showsResumeAction {
+                    Button("Resume This App", action: actions.resumeCurrentApp)
+                        .controlSize(.small)
+                }
+
+                if let message = presentation.adapterGenerationMessage {
                     AdapterGenerationMessage(
                         message: message,
-                        hasPreview: snapshot.hasGeneratedAdapterPreview
+                        hasPreview: presentation.hasGeneratedAdapterPreview
                     )
                 }
             }
@@ -395,7 +599,7 @@ private struct AvailableShortcutsSection: View {
 }
 
 private struct ShortcutList: View {
-    let shortcuts: [AvailableShortcut]
+    let shortcuts: [ShortcutRowPresentation]
 
     var body: some View {
         ScrollView {
@@ -411,11 +615,11 @@ private struct ShortcutList: View {
 }
 
 private struct AvailableShortcutRow: View {
-    let shortcut: AvailableShortcut
+    let shortcut: ShortcutRowPresentation
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            ShortcutKeyBadge(text: shortcut.defaultKeys.displayString)
+            ShortcutKeyBadge(text: shortcut.defaultKeys)
                 .frame(minWidth: 58, alignment: .trailing)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -435,7 +639,7 @@ private struct AvailableShortcutRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(shortcut.name), \(shortcut.defaultKeys.displayString), \(shortcut.actionDescription)"
+            "\(shortcut.name), \(shortcut.defaultKeys), \(shortcut.actionDescription)"
         )
     }
 }
@@ -455,22 +659,20 @@ private struct ShortcutActionPill: View {
 }
 
 private struct EmptyShortcutState: View {
-    let title: String
-    let detail: String
-    let showsAddButton: Bool
+    let presentation: EmptyShortcutStatePresentation
     let actions: StatusBarActions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: "keyboard.badge.ellipsis")
+            Label(presentation.title, systemImage: "keyboard.badge.ellipsis")
                 .font(.caption.weight(.semibold))
                 .foregroundColor(.secondary)
-            Text(detail)
+            Text(presentation.detail)
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if showsAddButton {
+            if presentation.showsAddButton {
                 Button("Add Current App", action: actions.addCurrentApp)
                     .controlSize(.small)
             }

@@ -8,6 +8,25 @@ import Combine
 /// this on every keystroke (via the fast `currentAppID` property) rather
 /// than querying NSWorkspace each time.
 public final class AppMonitor: ObservableObject {
+    public struct ActiveApplicationSnapshot: Equatable {
+        public let bundleIdentifier: String?
+        public let localizedName: String?
+        public let processIdentifier: pid_t
+        public let isTerminated: Bool
+
+        public init(
+            bundleIdentifier: String?,
+            localizedName: String?,
+            processIdentifier: pid_t,
+            isTerminated: Bool = false
+        ) {
+            self.bundleIdentifier = bundleIdentifier
+            self.localizedName = localizedName
+            self.processIdentifier = processIdentifier
+            self.isTerminated = isTerminated
+        }
+    }
+
     public struct Snapshot: Equatable {
         public let currentBundleID: String?
         public let currentAppName: String?
@@ -63,50 +82,113 @@ public final class AppMonitor: ObservableObject {
 
     @Published public private(set) var browserContextUpdatedAt: Date?
 
-    private var cancellable: AnyCancellable?
+    private var cancellables = Set<AnyCancellable>()
     private let stateLock = NSRecursiveLock()
+    private let ignoredBundleIdentifiers: Set<String>
 
-    public init() {
+    public init(
+        ignoredBundleIdentifiers: Set<String>? = nil
+    ) {
+        self.ignoredBundleIdentifiers = ignoredBundleIdentifiers
+            ?? AppMonitor.defaultIgnoredBundleIdentifiers()
+
         // Seed with current frontmost app
-        if let app = NSWorkspace.shared.frontmostApplication {
-            updateActiveApplication(
-                bundleIdentifier: app.bundleIdentifier,
-                localizedName: app.localizedName,
-                processIdentifier: app.processIdentifier
-            )
-        }
+        refreshActiveApplication()
 
         // Observe future changes
-        cancellable = NSWorkspace.shared.notificationCenter
+        NSWorkspace.shared.notificationCenter
             .publisher(for: NSWorkspace.didActivateApplicationNotification)
             .compactMap { notification -> NSRunningApplication? in
                 notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] app in
-                self?.updateActiveApplication(
-                    bundleIdentifier: app.bundleIdentifier,
-                    localizedName: app.localizedName,
-                    processIdentifier: app.processIdentifier
-                )
+                self?.updateActiveApplication(Self.snapshot(for: app))
             }
+            .store(in: &cancellables)
+
+        NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didTerminateApplicationNotification)
+            .compactMap { notification -> NSRunningApplication? in
+                notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] app in
+                self?.activeApplicationDidTerminate(Self.snapshot(for: app))
+            }
+            .store(in: &cancellables)
     }
 
+    @discardableResult
+    public func activeApplicationDidTerminate(
+        _ application: ActiveApplicationSnapshot
+    ) -> Bool {
+        stateLock.lock()
+        let isCurrentApplication = currentPID == application.processIdentifier &&
+            currentBundleID == application.bundleIdentifier
+        guard isCurrentApplication else {
+            stateLock.unlock()
+            return false
+        }
+
+        currentBundleID = nil
+        currentAppName = nil
+        currentPID = 0
+        stateLock.unlock()
+
+        clearBrowserContext()
+        return true
+    }
+
+    @discardableResult
+    public func refreshActiveApplication() -> Bool {
+        refreshActiveApplication(
+            frontmostApplication: NSWorkspace.shared.frontmostApplication.map(Self.snapshot)
+        )
+    }
+
+    @discardableResult
+    public func refreshActiveApplication(
+        frontmostApplication: ActiveApplicationSnapshot?
+    ) -> Bool {
+        guard let frontmostApplication else { return false }
+        return updateActiveApplication(frontmostApplication)
+    }
+
+    @discardableResult
     public func updateActiveApplication(
         bundleIdentifier: String?,
         localizedName: String?,
         processIdentifier: pid_t
-    ) {
+    ) -> Bool {
+        updateActiveApplication(
+            ActiveApplicationSnapshot(
+                bundleIdentifier: bundleIdentifier,
+                localizedName: localizedName,
+                processIdentifier: processIdentifier
+            )
+        )
+    }
+
+    @discardableResult
+    private func updateActiveApplication(_ application: ActiveApplicationSnapshot) -> Bool {
+        guard shouldAcceptActiveApplication(application) else {
+            return false
+        }
+
         stateLock.lock()
         let previousBundleID = currentBundleID
-        currentBundleID = bundleIdentifier
-        currentAppName = localizedName
-        currentPID = processIdentifier
+        currentBundleID = application.bundleIdentifier
+        currentAppName = application.localizedName
+        currentPID = application.processIdentifier
         stateLock.unlock()
 
-        if previousBundleID != bundleIdentifier || !isBrowser(bundleIdentifier) {
+        if previousBundleID != application.bundleIdentifier ||
+            !isBrowser(application.bundleIdentifier) {
             clearBrowserContext()
         }
+
+        return true
     }
 
     public func updateBrowserContext(
@@ -192,6 +274,36 @@ public final class AppMonitor: ObservableObject {
         "org.mozilla.nightly",
         "com.operasoftware.Opera"
     ]
+
+    private static func defaultIgnoredBundleIdentifiers() -> Set<String> {
+        var identifiers: Set<String> = [
+            "app.peyton.shorty",
+            "app.peyton.shorty.appstore"
+        ]
+
+        if let bundleIdentifier = Bundle.main.bundleIdentifier {
+            identifiers.insert(bundleIdentifier)
+        }
+
+        return identifiers
+    }
+
+    private static func snapshot(for app: NSRunningApplication) -> ActiveApplicationSnapshot {
+        ActiveApplicationSnapshot(
+            bundleIdentifier: app.bundleIdentifier,
+            localizedName: app.localizedName,
+            processIdentifier: app.processIdentifier,
+            isTerminated: app.isTerminated
+        )
+    }
+
+    private func shouldAcceptActiveApplication(
+        _ application: ActiveApplicationSnapshot
+    ) -> Bool {
+        guard !application.isTerminated else { return false }
+        guard let bundleIdentifier = application.bundleIdentifier else { return true }
+        return !ignoredBundleIdentifiers.contains(bundleIdentifier)
+    }
 
     private func isBrowser(_ bundleID: String?) -> Bool {
         guard let id = bundleID else { return false }
