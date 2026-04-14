@@ -188,7 +188,7 @@ extension CanonicalShortcut {
         CanonicalShortcut(
             id: "spotlight_search",
             name: "Search Everything",
-            defaultKeys: KeyCombo(keyCode: 0x2F, modifiers: .command), // Cmd+.  — actually let's use Cmd+K
+            defaultKeys: KeyCombo(keyCode: 0x28, modifiers: .command), // Cmd+K
             category: .search,
             description: "Global search or spotlight within the app"
         ),

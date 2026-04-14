@@ -105,6 +105,11 @@ final class KeyComboTests: XCTestCase {
         XCTAssertEqual(find?.category, .search)
     }
 
+    func testSpotlightSearchDefaultsToCommandK() {
+        let search = CanonicalShortcut.defaults.first { $0.id == "spotlight_search" }
+        XCTAssertEqual(search?.defaultKeys, KeyCombo(from: "cmd+k"))
+    }
+
     // MARK: - Adapter
 
     func testAdapterMappingLookup() {
@@ -219,6 +224,42 @@ final class KeyComboTests: XCTestCase {
             DomainNormalizer.adapterIdentifier(for: "docs.google.com"),
             "web:docs.google.com"
         )
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(for: "calendar.google.com"),
+            "web:calendar.google.com"
+        )
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(for: "drive.google.com"),
+            "web:drive.google.com"
+        )
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(for: "sheets.google.com"),
+            "web:sheets.google.com"
+        )
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(for: "slides.google.com"),
+            "web:slides.google.com"
+        )
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(for: "meet.google.com"),
+            "web:meet.google.com"
+        )
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(for: "team.chatgpt.com"),
+            "web:chatgpt.com"
+        )
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(for: "console.claude.ai"),
+            "web:claude.ai"
+        )
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(for: "gist.github.com"),
+            "web:github.com"
+        )
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(for: "web.whatsapp.com"),
+            "web:whatsapp.com"
+        )
     }
 
     func testDomainNormalizerUnknownDomain() {
@@ -290,12 +331,75 @@ final class KeyComboTests: XCTestCase {
 
     func testRegistryIncludesWebAdapters() {
         let ids = Set(AdapterRegistry.builtinAdapters.map(\.appIdentifier))
-        XCTAssertTrue(ids.contains("web:notion.so"))
-        XCTAssertTrue(ids.contains("web:slack.com"))
-        XCTAssertTrue(ids.contains("web:mail.google.com"))
-        XCTAssertTrue(ids.contains("web:docs.google.com"))
-        XCTAssertTrue(ids.contains("web:figma.com"))
-        XCTAssertTrue(ids.contains("web:linear.app"))
+        let expectedIDs = [
+            "web:notion.so",
+            "web:slack.com",
+            "web:mail.google.com",
+            "web:docs.google.com",
+            "web:figma.com",
+            "web:linear.app",
+            "web:chatgpt.com",
+            "web:claude.ai",
+            "web:github.com",
+            "web:calendar.google.com",
+            "web:drive.google.com",
+            "web:sheets.google.com",
+            "web:slides.google.com",
+            "web:meet.google.com",
+            "web:whatsapp.com"
+        ]
+
+        for id in expectedIDs {
+            XCTAssertTrue(ids.contains(id), "Expected built-in web adapter for \(id)")
+        }
+    }
+
+    func testRegistryIncludesRepresentativeAuditedNativeAdapters() {
+        let ids = Set(AdapterRegistry.builtinAdapters.map(\.appIdentifier))
+        let expectedIDs = [
+            "com.openai.atlas",
+            "com.openai.chat",
+            "com.openai.codex",
+            "com.anthropic.claudefordesktop",
+            "com.raycast.macos",
+            "com.iconfactory.Tot",
+            "com.apple.TextEdit",
+            "org.whispersystems.signal-desktop",
+            "net.whatsapp.WhatsApp",
+            "dev.zed.Zed-Preview",
+            "com.microsoft.VSCodeInsiders",
+            "com.figma.Desktop",
+            "com.microsoft.Word",
+            "com.apple.iWork.Pages"
+        ]
+
+        for id in expectedIDs {
+            XCTAssertTrue(ids.contains(id), "Expected built-in native adapter for \(id)")
+        }
+    }
+
+    func testBuiltInMappingTemplatesDoNotDuplicateCanonicalIDs() {
+        let templates = [
+            ("browser", AdapterRegistry.commonBrowserMappings),
+            ("document", AdapterRegistry.commonDocumentMappings),
+            ("chat", AdapterRegistry.commonChatMappings),
+            ("terminal", AdapterRegistry.commonTerminalMappings),
+            ("code editor", AdapterRegistry.commonCodeEditorMappings),
+            ("media", AdapterRegistry.commonMediaMappings)
+        ]
+
+        for (name, mappings) in templates {
+            assertNoDuplicateCanonicalIDs(mappings, label: name)
+        }
+    }
+
+    func testBuiltInAdaptersDoNotDuplicateCanonicalIDs() {
+        for adapter in AdapterRegistry.builtinAdapters {
+            assertNoDuplicateCanonicalIDs(
+                adapter.mappings,
+                label: adapter.appIdentifier
+            )
+        }
     }
 
     func testRegistryUsesIndexedResolution() {
@@ -363,5 +467,18 @@ final class KeyComboTests: XCTestCase {
     private func temporaryDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("ShortyTests-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    private func assertNoDuplicateCanonicalIDs(
+        _ mappings: [Adapter.Mapping],
+        label: String
+    ) {
+        var seen = Set<String>()
+        for mapping in mappings {
+            XCTAssertTrue(
+                seen.insert(mapping.canonicalID).inserted,
+                "Duplicate canonical mapping \(mapping.canonicalID) in \(label)"
+            )
+        }
     }
 }

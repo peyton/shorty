@@ -2,14 +2,29 @@ import Foundation
 
 /// Converts browser-reported hosts into stable web adapter identifiers.
 public enum DomainNormalizer {
-    public static let supportedWebAppDomains: Set<String> = [
-        "notion.so",
-        "slack.com",
+    private static let exactDomainMatches: Set<String> = [
         "mail.google.com",
         "docs.google.com",
-        "figma.com",
-        "linear.app"
+        "calendar.google.com",
+        "drive.google.com",
+        "sheets.google.com",
+        "slides.google.com",
+        "meet.google.com"
     ]
+
+    private static let rootDomainMatches: Set<String> = [
+        "notion.so",
+        "slack.com",
+        "figma.com",
+        "linear.app",
+        "chatgpt.com",
+        "claude.ai",
+        "github.com",
+        "whatsapp.com"
+    ]
+
+    public static let supportedWebAppDomains = exactDomainMatches
+        .union(rootDomainMatches)
 
     /// Return the adapter identifier used by `AdapterRegistry`.
     public static func adapterIdentifier(for host: String) -> String {
@@ -36,23 +51,12 @@ public enum DomainNormalizer {
             ? String(cleaned.dropFirst(4))
             : cleaned
 
-        if matches(withoutWWW, root: "notion.so") {
-            return "notion.so"
+        if exactDomainMatches.contains(withoutWWW) {
+            return withoutWWW
         }
-        if matches(withoutWWW, root: "slack.com") {
-            return "slack.com"
-        }
-        if withoutWWW == "mail.google.com" {
-            return "mail.google.com"
-        }
-        if withoutWWW == "docs.google.com" {
-            return "docs.google.com"
-        }
-        if matches(withoutWWW, root: "figma.com") {
-            return "figma.com"
-        }
-        if matches(withoutWWW, root: "linear.app") {
-            return "linear.app"
+
+        if let root = rootDomainMatches.first(where: { matches(withoutWWW, root: $0) }) {
+            return root
         }
 
         return withoutWWW
