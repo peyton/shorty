@@ -36,7 +36,11 @@ struct StatusBarSnapshot {
     let safariExtensionStatus: String
     let shortcutReviewCount: Int
     let eventsIntercepted: Int
+    let eventsMatched: Int
     let eventsRemapped: Int
+    let eventsPassedThrough: Int
+    let menuActionsInvoked: Int
+    let accessibilityActionsInvoked: Int
     let validationMessages: [String]
     let adapterGenerationMessage: String?
     let hasGeneratedAdapterPreview: Bool
@@ -92,7 +96,11 @@ struct StatusBarSnapshot {
             safariExtensionStatus: engine.safariExtensionStatus.title,
             shortcutReviewCount: engine.shortcutProfile.conflicts().count,
             eventsIntercepted: engine.eventTap.eventsIntercepted,
+            eventsMatched: engine.eventTap.shortcutsMatched,
             eventsRemapped: engine.eventTap.eventsRemapped,
+            eventsPassedThrough: engine.eventTap.counters.eventsPassedThrough,
+            menuActionsInvoked: engine.eventTap.counters.menuActionsInvoked,
+            accessibilityActionsInvoked: engine.eventTap.counters.accessibilityActionsInvoked,
             validationMessages: engine.registry.validationMessages,
             adapterGenerationMessage: engine.adapterGenerationMessage,
             hasGeneratedAdapterPreview: engine.generatedAdapterPreview != nil
@@ -505,8 +513,12 @@ private struct DetailsSection: View {
                 StatusInfoRow("Bridge", snapshot.bridgeStatus)
                 StatusInfoRow("Safari", snapshot.safariExtensionStatus)
                 StatusInfoRow("Shortcut review", "\(snapshot.shortcutReviewCount)")
-                StatusInfoRow("Intercepted", "\(snapshot.eventsIntercepted)")
-                StatusInfoRow("Translated", "\(snapshot.eventsRemapped)")
+                StatusInfoRow("Key events seen", "\(snapshot.eventsIntercepted)")
+                StatusInfoRow("Shortcuts matched", "\(snapshot.eventsMatched)")
+                StatusInfoRow("Key remaps", "\(snapshot.eventsRemapped)")
+                StatusInfoRow("Native pass-throughs", "\(snapshot.eventsPassedThrough)")
+                StatusInfoRow("Menu actions", "\(snapshot.menuActionsInvoked)")
+                StatusInfoRow("Accessibility actions", "\(snapshot.accessibilityActionsInvoked)")
 
                 if !snapshot.validationMessages.isEmpty {
                     Label(

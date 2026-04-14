@@ -363,7 +363,11 @@ public struct RuntimeDiagnosticSnapshot: Codable, Equatable {
     public let bridgeStatus: String
     public let safariExtensionStatus: SafariExtensionStatus
     public let eventsIntercepted: Int
+    public let eventsMatched: Int
     public let eventsRemapped: Int
+    public let eventsPassedThrough: Int
+    public let menuActionsInvoked: Int
+    public let accessibilityActionsInvoked: Int
     public let adapterValidationMessages: [String]
 
     public init(
@@ -378,7 +382,11 @@ public struct RuntimeDiagnosticSnapshot: Codable, Equatable {
         bridgeStatus: String,
         safariExtensionStatus: SafariExtensionStatus,
         eventsIntercepted: Int,
+        eventsMatched: Int = 0,
         eventsRemapped: Int,
+        eventsPassedThrough: Int = 0,
+        menuActionsInvoked: Int = 0,
+        accessibilityActionsInvoked: Int = 0,
         adapterValidationMessages: [String]
     ) {
         self.createdAt = createdAt
@@ -392,7 +400,11 @@ public struct RuntimeDiagnosticSnapshot: Codable, Equatable {
         self.bridgeStatus = bridgeStatus
         self.safariExtensionStatus = safariExtensionStatus
         self.eventsIntercepted = eventsIntercepted
+        self.eventsMatched = eventsMatched
         self.eventsRemapped = eventsRemapped
+        self.eventsPassedThrough = eventsPassedThrough
+        self.menuActionsInvoked = menuActionsInvoked
+        self.accessibilityActionsInvoked = accessibilityActionsInvoked
         self.adapterValidationMessages = adapterValidationMessages
     }
 }
@@ -401,16 +413,21 @@ public struct SupportBundleSummary: Codable, Equatable {
     public let appVersion: String
     public let updateStatus: UpdateStatus
     public let launchAtLoginStatus: LaunchAtLoginStatus
+    public let bridgeInstallStatuses: [BridgeInstallStatus]
+    public let adapterRevisionCount: Int
     public let adapterCount: Int
     public let adapterCountsBySource: [String: Int]
     public let supportedWebDomains: [String]
     public let validationWarningCount: Int
     public let activeAvailability: ShortcutAvailability
+    public let generatedAdapterReview: AdapterReview?
 
     public init(
         appVersion: String = "Unknown",
         updateStatus: UpdateStatus = UpdateStatus(),
         launchAtLoginStatus: LaunchAtLoginStatus = LaunchAtLoginStatus(),
+        bridgeInstallStatuses: [BridgeInstallStatus] = [],
+        adapterRevisionCount: Int = 0,
         adapterCount: Int = 0,
         adapterCountsBySource: [String: Int] = [:],
         supportedWebDomains: [String] = [],
@@ -419,16 +436,20 @@ public struct SupportBundleSummary: Codable, Equatable {
             state: .noActiveApp,
             appIdentifier: nil,
             appDisplayName: "Unknown"
-        )
+        ),
+        generatedAdapterReview: AdapterReview? = nil
     ) {
         self.appVersion = appVersion
         self.updateStatus = updateStatus
         self.launchAtLoginStatus = launchAtLoginStatus
+        self.bridgeInstallStatuses = bridgeInstallStatuses
+        self.adapterRevisionCount = adapterRevisionCount
         self.adapterCount = adapterCount
         self.adapterCountsBySource = adapterCountsBySource
         self.supportedWebDomains = supportedWebDomains
         self.validationWarningCount = validationWarningCount
         self.activeAvailability = activeAvailability
+        self.generatedAdapterReview = generatedAdapterReview
     }
 }
 

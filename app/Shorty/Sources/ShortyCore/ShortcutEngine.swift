@@ -28,8 +28,11 @@ public final class ShortcutEngine: ObservableObject {
     @Published public private(set) var updateStatus: UpdateStatus
     @Published public private(set) var safariExtensionStatus = SafariExtensionStatus()
     @Published public private(set) var launchAtLoginStatus: LaunchAtLoginStatus
+    @Published public private(set) var bridgeInstallStatuses: [BridgeInstallStatus]
     @Published public private(set) var isFirstRunComplete: Bool
     @Published public private(set) var generatedAdapterPreview: Adapter?
+    @Published public private(set) var generatedAdapterReview: AdapterReview?
+    @Published public private(set) var adapterRevisions: [AdapterRevision] = []
     @Published public private(set) var adapterGenerationMessage: String?
 
     /// Last error message kept for older UI callsites.
@@ -43,6 +46,7 @@ public final class ShortcutEngine: ObservableObject {
     private var accessibilityPermissionTimer: Timer?
     private let userDefaults: UserDefaults
     private let safariExtensionUserDefaults: UserDefaults?
+    private let bridgeInstallManager: BrowserBridgeInstallManager
 
     // MARK: - Init
 
@@ -69,6 +73,8 @@ public final class ShortcutEngine: ObservableObject {
             )
         )
         self.launchAtLoginStatus = Self.currentLaunchAtLoginStatus()
+        self.bridgeInstallManager = BrowserBridgeInstallManager()
+        self.bridgeInstallStatuses = bridgeInstallManager.statuses()
         self.appMonitor = AppMonitor()
         self.registry = AdapterRegistry()
         self.eventTap = EventTapManager(
@@ -137,6 +143,7 @@ public final class ShortcutEngine: ObservableObject {
         browserBridge?.stop()
         adapterGenerationInFlight.removeAll()
         generatedAdapterPreview = nil
+        generatedAdapterReview = nil
         adapterGenerationMessage = nil
         isRunning = false
         setStatus(.stopped)
@@ -205,8 +212,13 @@ public final class ShortcutEngine: ObservableObject {
 
         do {
             try registry.saveAutoAdapter(adapter)
+            recordAdapterRevision(
+                adapter,
+                summary: "Saved generated adapter with \(adapter.mappings.count) mappings."
+            )
             generatedAdapterPreview = nil
             adapterGenerationMessage = "Saved adapter for \(adapter.appName)."
+            generatedAdapterReview = nil
         } catch {
             adapterGenerationMessage = "Could not save generated adapter: \(error)"
             ShortyLog.engine.error("Failed to save generated adapter: \(error.localizedDescription)")
@@ -215,6 +227,7 @@ public final class ShortcutEngine: ObservableObject {
 
     public func discardGeneratedAdapterPreview() {
         generatedAdapterPreview = nil
+        generatedAdapterReview = nil
         adapterGenerationMessage = nil
     }
 
@@ -251,6 +264,10 @@ public final class ShortcutEngine: ObservableObject {
 
     public func refreshLaunchAtLoginStatus() {
         launchAtLoginStatus = Self.currentLaunchAtLoginStatus()
+    }
+
+    public func refreshBridgeInstallStatuses() {
+        bridgeInstallStatuses = bridgeInstallManager.statuses()
     }
 
     public func setLaunchAtLoginEnabled(_ isEnabled: Bool) {
@@ -351,7 +368,11 @@ public final class ShortcutEngine: ObservableObject {
             bridgeStatus: browserBridge?.status.title ?? "Unavailable",
             safariExtensionStatus: safariExtensionStatus,
             eventsIntercepted: eventTap.eventsIntercepted,
+            eventsMatched: eventTap.shortcutsMatched,
             eventsRemapped: eventTap.eventsRemapped,
+            eventsPassedThrough: eventTap.counters.eventsPassedThrough,
+            menuActionsInvoked: eventTap.counters.menuActionsInvoked,
+            accessibilityActionsInvoked: eventTap.counters.accessibilityActionsInvoked,
             adapterValidationMessages: registry.validationMessages
         )
     }
@@ -373,11 +394,14 @@ public final class ShortcutEngine: ObservableObject {
                 appVersion: updateStatus.currentVersion,
                 updateStatus: updateStatus,
                 launchAtLoginStatus: launchAtLoginStatus,
+                bridgeInstallStatuses: bridgeInstallStatuses,
+                adapterRevisionCount: adapterRevisions.count,
                 adapterCount: adapterIDs.count,
                 adapterCountsBySource: adapterCountsBySource,
                 supportedWebDomains: DomainNormalizer.supportedWebAppDomains.sorted(),
                 validationWarningCount: registry.validationMessages.count,
-                activeAvailability: activeAvailability
+                activeAvailability: activeAvailability,
+                generatedAdapterReview: generatedAdapterReview
             ),
             diagnostics: diagnosticSnapshot(),
             shortcutProfile: shortcutProfile,
@@ -431,6 +455,7 @@ public final class ShortcutEngine: ObservableObject {
         }
 
         generatedAdapterPreview = nil
+        generatedAdapterReview = nil
         adapterGenerationMessage = "Reading menus for \(appName)..."
 
         let timeout = DispatchWorkItem { [weak self] in
@@ -469,15 +494,101 @@ public final class ShortcutEngine: ObservableObject {
                 if saveAutomatically {
                     do {
                         try self.registry.saveAutoAdapter(adapter)
+                        self.recordAdapterRevision(
+                            adapter,
+                            summary: "Saved generated adapter with \(adapter.mappings.count) mappings."
+                        )
                         self.adapterGenerationMessage = "Saved adapter for \(adapter.appName)."
                     } catch {
                         self.adapterGenerationMessage = "Could not save generated adapter: \(error)"
                     }
                 } else {
                     self.generatedAdapterPreview = adapter
+                    self.generatedAdapterReview = Self.reviewGeneratedAdapter(adapter)
                     self.adapterGenerationMessage = "Generated \(adapter.mappings.count) mappings for \(adapter.appName). Review before saving."
                 }
             }
+        }
+    }
+
+    public static func reviewGeneratedAdapter(
+        _ adapter: Adapter,
+        canonicals: [CanonicalShortcut] = CanonicalShortcut.defaults
+    ) -> AdapterReview {
+        let canonicalIDs = Set(canonicals.map(\.id))
+        let mappedIDs = Set(adapter.mappings.map(\.canonicalID))
+        let coverageRatio = canonicals.isEmpty
+            ? 0
+            : Double(mappedIDs.intersection(canonicalIDs).count) / Double(canonicals.count)
+        let mappingCount = adapter.mappings.count
+        let keyRemapCount = adapter.mappings.filter { $0.method == .keyRemap }.count
+        let menuInvokeCount = adapter.mappings.filter { $0.method == .menuInvoke }.count
+        let passthroughCount = adapter.mappings.filter { $0.method == .passthrough }.count
+        let axActionCount = adapter.mappings.filter { $0.method == .axAction }.count
+        let riskyIDs = Set(["submit_field", "newline_in_field"])
+        let riskyMappings = adapter.mappings.filter { riskyIDs.contains($0.canonicalID) }
+        let unknownIDs = mappedIDs.subtracting(canonicalIDs)
+
+        var confidence = 0.35 + (coverageRatio * 0.45)
+        if keyRemapCount > 0 {
+            confidence += 0.08
+        }
+        if menuInvokeCount > keyRemapCount {
+            confidence -= 0.12
+        }
+        if !riskyMappings.isEmpty {
+            confidence -= 0.10
+        }
+        confidence = min(max(confidence, 0.10), 0.98)
+
+        var reasons = [
+            "Matched \(mappingCount) shortcut\(mappingCount == 1 ? "" : "s") from the app's menus.",
+            "\(Int((coverageRatio * 100).rounded()))% of Shorty's canonical shortcuts are covered."
+        ]
+        if keyRemapCount > 0 {
+            reasons.append("\(keyRemapCount) mapping\(keyRemapCount == 1 ? "" : "s") can use direct key remapping.")
+        }
+        if passthroughCount > 0 {
+            reasons.append("\(passthroughCount) mapping\(passthroughCount == 1 ? "" : "s") already match Shorty's default keys.")
+        }
+        if axActionCount > 0 {
+            reasons.append("\(axActionCount) mapping\(axActionCount == 1 ? "" : "s") use direct Accessibility actions.")
+        }
+
+        var warnings: [String] = []
+        if coverageRatio < 0.35 {
+            warnings.append("Low coverage. Save only if these are the shortcuts you need every day.")
+        }
+        if !riskyMappings.isEmpty {
+            let names = riskyMappings.map(\.canonicalID).sorted().joined(separator: ", ")
+            warnings.append("Review text-entry behavior before saving: \(names).")
+        }
+        if menuInvokeCount > 0 {
+            warnings.append("Menu-invoked shortcuts depend on the app's menu titles staying stable.")
+        }
+        if !unknownIDs.isEmpty {
+            warnings.append("Unknown canonical shortcut IDs: \(unknownIDs.sorted().joined(separator: ", ")).")
+        }
+
+        return AdapterReview(
+            adapterIdentifier: adapter.appIdentifier,
+            confidence: confidence,
+            reasons: reasons,
+            warnings: warnings
+        )
+    }
+
+    private func recordAdapterRevision(_ adapter: Adapter, summary: String) {
+        adapterRevisions.insert(
+            AdapterRevision(
+                adapterIdentifier: adapter.appIdentifier,
+                summary: summary,
+                adapter: adapter
+            ),
+            at: 0
+        )
+        if adapterRevisions.count > 20 {
+            adapterRevisions.removeLast(adapterRevisions.count - 20)
         }
     }
 

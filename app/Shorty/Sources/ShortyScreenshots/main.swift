@@ -270,10 +270,12 @@ private struct ScreenshotFixtures {
             validationMessages: [],
             adapterGenerationMessage: "Generated 6 mappings for Things. Review before saving.",
             generatedAdapterPreview: nil,
+            generatedAdapterReview: nil,
             versionBuild: "1.0.0 (1)",
             engineStatus: "Shorty is active",
             accessibilityStatus: "Granted",
             browserBridgeStatus: "Browser bridge ready",
+            bridgeInstallStatuses: [],
             safariExtensionStatus: SafariExtensionStatus(
                 state: .bundled,
                 detail: "The Safari extension is included with this build. Enable it in Safari Settings before using web-app adapters in Safari."
@@ -303,7 +305,11 @@ private struct ScreenshotFixtures {
                     detail: "The Safari extension is included with this build."
                 ),
                 eventsIntercepted: 184,
+                eventsMatched: 82,
                 eventsRemapped: 57,
+                eventsPassedThrough: 21,
+                menuActionsInvoked: 4,
+                accessibilityActionsInvoked: 0,
                 adapterValidationMessages: []
             ),
             displayStatus: EngineDisplayStatus.make(
@@ -337,7 +343,11 @@ private struct ScreenshotFixtures {
             safariExtensionStatus: "Safari extension bundled",
             shortcutReviewCount: UserShortcutProfile.releaseDefault.conflicts().count,
             eventsIntercepted: 184,
+            eventsMatched: 82,
             eventsRemapped: 57,
+            eventsPassedThrough: 21,
+            menuActionsInvoked: 4,
+            accessibilityActionsInvoked: 0,
             validationMessages: [],
             adapterGenerationMessage: nil,
             hasGeneratedAdapterPreview: false
@@ -363,7 +373,11 @@ private struct ScreenshotFixtures {
             safariExtensionStatus: "Safari extension disabled",
             shortcutReviewCount: UserShortcutProfile.releaseDefault.conflicts().count,
             eventsIntercepted: 0,
+            eventsMatched: 0,
             eventsRemapped: 0,
+            eventsPassedThrough: 0,
+            menuActionsInvoked: 0,
+            accessibilityActionsInvoked: 0,
             validationMessages: [],
             adapterGenerationMessage: nil,
             hasGeneratedAdapterPreview: false
@@ -389,7 +403,11 @@ private struct ScreenshotFixtures {
             safariExtensionStatus: "Safari extension bundled",
             shortcutReviewCount: UserShortcutProfile.releaseDefault.conflicts().count,
             eventsIntercepted: 184,
+            eventsMatched: 82,
             eventsRemapped: 57,
+            eventsPassedThrough: 21,
+            menuActionsInvoked: 4,
+            accessibilityActionsInvoked: 0,
             validationMessages: [],
             adapterGenerationMessage: nil,
             hasGeneratedAdapterPreview: false
@@ -415,7 +433,11 @@ private struct ScreenshotFixtures {
             safariExtensionStatus: "Safari extension bundled",
             shortcutReviewCount: UserShortcutProfile.releaseDefault.conflicts().count,
             eventsIntercepted: 184,
+            eventsMatched: 82,
             eventsRemapped: 57,
+            eventsPassedThrough: 21,
+            menuActionsInvoked: 4,
+            accessibilityActionsInvoked: 0,
             validationMessages: [],
             adapterGenerationMessage: "No matching shortcuts were found in Acme Notes.",
             hasGeneratedAdapterPreview: false

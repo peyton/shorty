@@ -509,6 +509,42 @@ final class KeyComboTests: XCTestCase {
         XCTAssertFalse(secondManager.isEnabled)
     }
 
+    func testEventTapCountersTrackSeenMatchedAndOutcomes() {
+        var counters = EventTapCounters()
+        counters.recordKeyDownEvent()
+        counters.recordResolvedAction(.passthrough)
+        counters.recordKeyDownEvent()
+        counters.recordResolvedAction(.remap(KeyCombo(from: "cmd+k")!))
+        counters.recordKeyDownEvent()
+        counters.recordResolvedAction(.invokeMenu("New Window"))
+        counters.recordKeyDownEvent()
+        counters.recordResolvedAction(.performAXAction("AXPress"))
+
+        XCTAssertEqual(counters.keyDownEventsSeen, 4)
+        XCTAssertEqual(counters.shortcutsMatched, 4)
+        XCTAssertEqual(counters.eventsPassedThrough, 1)
+        XCTAssertEqual(counters.eventsRemapped, 1)
+        XCTAssertEqual(counters.menuActionsInvoked, 1)
+        XCTAssertEqual(counters.accessibilityActionsInvoked, 1)
+    }
+
+    func testEventTapCountersMergePendingFlushes() {
+        var counters = EventTapCounters(keyDownEventsSeen: 1, shortcutsMatched: 1)
+        let pending = EventTapCounters(
+            keyDownEventsSeen: 2,
+            shortcutsMatched: 2,
+            eventsRemapped: 1,
+            eventsPassedThrough: 1
+        )
+
+        counters.merge(pending)
+
+        XCTAssertEqual(counters.keyDownEventsSeen, 3)
+        XCTAssertEqual(counters.shortcutsMatched, 3)
+        XCTAssertEqual(counters.eventsRemapped, 1)
+        XCTAssertEqual(counters.eventsPassedThrough, 1)
+    }
+
     func testReleaseConfigurationDisablesAutoAdapterGenerationByDefault() {
         XCTAssertFalse(EngineConfiguration.releaseDefault.autoGenerateMenuAdapters)
         XCTAssertFalse(EngineConfiguration.releaseDefault.reportAllBrowserDomains)

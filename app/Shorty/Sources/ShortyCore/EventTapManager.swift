@@ -2,6 +2,67 @@ import AppKit
 import Combine
 import CoreGraphics
 
+public struct EventTapCounters: Codable, Equatable {
+    public private(set) var keyDownEventsSeen: Int
+    public private(set) var shortcutsMatched: Int
+    public private(set) var eventsRemapped: Int
+    public private(set) var eventsPassedThrough: Int
+    public private(set) var menuActionsInvoked: Int
+    public private(set) var accessibilityActionsInvoked: Int
+
+    public init(
+        keyDownEventsSeen: Int = 0,
+        shortcutsMatched: Int = 0,
+        eventsRemapped: Int = 0,
+        eventsPassedThrough: Int = 0,
+        menuActionsInvoked: Int = 0,
+        accessibilityActionsInvoked: Int = 0
+    ) {
+        self.keyDownEventsSeen = keyDownEventsSeen
+        self.shortcutsMatched = shortcutsMatched
+        self.eventsRemapped = eventsRemapped
+        self.eventsPassedThrough = eventsPassedThrough
+        self.menuActionsInvoked = menuActionsInvoked
+        self.accessibilityActionsInvoked = accessibilityActionsInvoked
+    }
+
+    public var isEmpty: Bool {
+        keyDownEventsSeen == 0
+            && shortcutsMatched == 0
+            && eventsRemapped == 0
+            && eventsPassedThrough == 0
+            && menuActionsInvoked == 0
+            && accessibilityActionsInvoked == 0
+    }
+
+    public mutating func recordKeyDownEvent() {
+        keyDownEventsSeen += 1
+    }
+
+    public mutating func recordResolvedAction(_ action: AdapterRegistry.ResolvedAction) {
+        shortcutsMatched += 1
+        switch action {
+        case .remap:
+            eventsRemapped += 1
+        case .passthrough:
+            eventsPassedThrough += 1
+        case .invokeMenu:
+            menuActionsInvoked += 1
+        case .performAXAction:
+            accessibilityActionsInvoked += 1
+        }
+    }
+
+    public mutating func merge(_ other: EventTapCounters) {
+        keyDownEventsSeen += other.keyDownEventsSeen
+        shortcutsMatched += other.shortcutsMatched
+        eventsRemapped += other.eventsRemapped
+        eventsPassedThrough += other.eventsPassedThrough
+        menuActionsInvoked += other.menuActionsInvoked
+        accessibilityActionsInvoked += other.accessibilityActionsInvoked
+    }
+}
+
 /// Installs a CGEventTap to intercept keyboard events and remap them
 /// according to the active adapter for the frontmost application.
 ///
@@ -34,11 +95,23 @@ public final class EventTapManager: ObservableObject {
     /// Whether the event tap is currently active and receiving events.
     @Published public private(set) var isActive: Bool = false
 
-    /// Cumulative count of events intercepted (useful for the UI).
-    @Published public private(set) var eventsIntercepted: Int = 0
+    /// Cumulative event-tap counters useful for diagnostics and support.
+    @Published public private(set) var counters = EventTapCounters()
+
+    /// Cumulative count of enabled keyDown events seen by the tap.
+    public var eventsIntercepted: Int {
+        counters.keyDownEventsSeen
+    }
 
     /// Cumulative count of events that were actually remapped.
-    @Published public private(set) var eventsRemapped: Int = 0
+    public var eventsRemapped: Int {
+        counters.eventsRemapped
+    }
+
+    /// Cumulative count of keyDown events that matched a Shorty shortcut.
+    public var shortcutsMatched: Int {
+        counters.shortcutsMatched
+    }
 
     /// Last lifecycle note, such as macOS temporarily disabling the tap.
     @Published public private(set) var lifecycleMessage: String?
@@ -82,8 +155,8 @@ public final class EventTapManager: ObservableObject {
     private let diagnosticsLock = NSLock()
     private let diagnosticsQueue = DispatchQueue(label: "com.shorty.eventtap.diagnostics")
     private var diagnosticsTimer: DispatchSourceTimer?
-    private var pendingEventsIntercepted: Int = 0
-    private var pendingEventsRemapped: Int = 0
+    private var pendingCounters = EventTapCounters()
+    private let actionQueue = DispatchQueue(label: "com.shorty.eventtap.actions", qos: .userInitiated)
 
     // MARK: - Init / Deinit
 
@@ -254,6 +327,7 @@ public final class EventTapManager: ObservableObject {
         // Don't intercept if user toggled off.
         guard isEnabled else { return event }
 
+        recordKeyDownEvent()
         let combo = KeyCombo(event: event)
 
         // Look up the canonical shortcut this combo corresponds to.
@@ -266,7 +340,7 @@ public final class EventTapManager: ObservableObject {
 
         switch resolved {
         case .remap(let nativeCombo):
-            recordEvent(remapped: true)
+            recordResolvedAction(resolved)
             // Mutate the event in place — change keycode and modifier flags.
             event.setIntegerValueField(.keyboardEventKeycode,
                                        value: Int64(nativeCombo.keyCode))
@@ -274,37 +348,40 @@ public final class EventTapManager: ObservableObject {
             return event
 
         case .invokeMenu(let menuTitle):
-            recordEvent(remapped: false)
+            recordResolvedAction(resolved)
             // Swallow the event and trigger the menu item via AX.
             let pid = appMonitor.currentPID
-            DispatchQueue.global(qos: .userInitiated).async {
+            actionQueue.async {
                 Self.invokeMenuItem(title: menuTitle, pid: pid)
             }
             return nil // swallow
 
         case .performAXAction(let action):
-            recordEvent(remapped: false)
+            recordResolvedAction(resolved)
             // Phase 2+ — placeholder for arbitrary AX actions.
             let pid = appMonitor.currentPID
-            DispatchQueue.global(qos: .userInitiated).async {
+            actionQueue.async {
                 Self.performAXAction(action, pid: pid)
             }
             return nil
 
         case .passthrough:
-            recordEvent(remapped: false)
+            recordResolvedAction(resolved)
             return event
         }
     }
 
     // MARK: - Diagnostics
 
-    private func recordEvent(remapped: Bool) {
+    private func recordKeyDownEvent() {
         diagnosticsLock.lock()
-        pendingEventsIntercepted += 1
-        if remapped {
-            pendingEventsRemapped += 1
-        }
+        pendingCounters.recordKeyDownEvent()
+        diagnosticsLock.unlock()
+    }
+
+    private func recordResolvedAction(_ action: AdapterRegistry.ResolvedAction) {
+        diagnosticsLock.lock()
+        pendingCounters.recordResolvedAction(action)
         diagnosticsLock.unlock()
     }
 
@@ -327,16 +404,13 @@ public final class EventTapManager: ObservableObject {
 
     private func flushDiagnostics() {
         diagnosticsLock.lock()
-        let intercepted = pendingEventsIntercepted
-        let remapped = pendingEventsRemapped
-        pendingEventsIntercepted = 0
-        pendingEventsRemapped = 0
+        let pending = pendingCounters
+        pendingCounters = EventTapCounters()
         diagnosticsLock.unlock()
 
-        guard intercepted > 0 || remapped > 0 else { return }
+        guard !pending.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
-            self?.eventsIntercepted += intercepted
-            self?.eventsRemapped += remapped
+            self?.counters.merge(pending)
         }
     }
 

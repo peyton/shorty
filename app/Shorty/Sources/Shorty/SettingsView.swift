@@ -66,10 +66,16 @@ private final class SettingsSnapshotStore: ObservableObject {
         observe(engine.$launchAtLoginStatus) { [weak self] _ in
             self?.scheduleRefresh()
         }
+        observe(engine.$bridgeInstallStatuses) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
         observe(engine.$isFirstRunComplete) { [weak self] _ in
             self?.scheduleRefresh()
         }
         observe(engine.$generatedAdapterPreview) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$generatedAdapterReview) { [weak self] _ in
             self?.scheduleRefresh()
         }
         observe(engine.$adapterGenerationMessage) { [weak self] _ in
@@ -103,10 +109,7 @@ private final class SettingsSnapshotStore: ObservableObject {
             self?.scheduleRefresh()
         }
 
-        observe(engine.eventTap.$eventsIntercepted) { [weak self] _ in
-            self?.scheduleRefresh()
-        }
-        observe(engine.eventTap.$eventsRemapped) { [weak self] _ in
+        observe(engine.eventTap.$counters) { [weak self] _ in
             self?.scheduleRefresh()
         }
 
@@ -180,10 +183,12 @@ struct SettingsSnapshot {
     let validationMessages: [String]
     let adapterGenerationMessage: String?
     let generatedAdapterPreview: Adapter?
+    let generatedAdapterReview: AdapterReview?
     let versionBuild: String
     let engineStatus: String
     let accessibilityStatus: String
     let browserBridgeStatus: String
+    let bridgeInstallStatuses: [BridgeInstallStatus]
     let safariExtensionStatus: SafariExtensionStatus
     let launchAtLoginStatus: LaunchAtLoginStatus
     let updateStatus: UpdateStatus
@@ -212,10 +217,12 @@ struct SettingsSnapshot {
             validationMessages: engine.registry.validationMessages,
             adapterGenerationMessage: engine.adapterGenerationMessage,
             generatedAdapterPreview: engine.generatedAdapterPreview,
+            generatedAdapterReview: engine.generatedAdapterReview,
             versionBuild: versionBuild,
             engineStatus: engine.status.title,
             accessibilityStatus: ShortcutEngine.hasAccessibilityPermission ? "Granted" : "Not granted",
             browserBridgeStatus: engine.browserBridge?.status.title ?? "Unavailable",
+            bridgeInstallStatuses: engine.bridgeInstallStatuses,
             safariExtensionStatus: engine.safariExtensionStatus,
             launchAtLoginStatus: engine.launchAtLoginStatus,
             updateStatus: engine.updateStatus,
@@ -263,7 +270,6 @@ struct SettingsActions {
     let resetFirstRun: () -> Void
     let setLaunchAtLogin: (Bool) -> Void
     let setAutomaticUpdates: (Bool) -> Void
-    let checkForUpdates: () -> Void
     let openSafariExtensionSettings: () -> Void
     let exportSupportBundle: () -> Void
     let copySupportBundle: () -> Void
@@ -277,7 +283,6 @@ struct SettingsActions {
         resetFirstRun: {},
         setLaunchAtLogin: { _ in },
         setAutomaticUpdates: { _ in },
-        checkForUpdates: {},
         openSafariExtensionSettings: {},
         exportSupportBundle: {},
         copySupportBundle: {}
@@ -293,12 +298,6 @@ struct SettingsActions {
             resetFirstRun: { engine.resetFirstRunState() },
             setLaunchAtLogin: { engine.setLaunchAtLoginEnabled($0) },
             setAutomaticUpdates: { engine.setAutomaticUpdateChecksEnabled($0) },
-            checkForUpdates: {
-                engine.recordUpdateCheckResult(
-                    state: .failed,
-                    detail: "Sparkle is not bundled in this build yet; release packaging will enable this check."
-                )
-            },
             openSafariExtensionSettings: {
                 SFSafariApplication.showPreferencesForExtension(
                     withIdentifier: engine.safariExtensionStatus.bundleIdentifier
@@ -424,6 +423,7 @@ struct SettingsContentView: View {
                 validationMessages: snapshot.validationMessages,
                 generationMessage: snapshot.adapterGenerationMessage,
                 generatedPreview: snapshot.generatedAdapterPreview,
+                generatedReview: snapshot.generatedAdapterReview,
                 canonicalByID: canonicalByID,
                 activeAvailability: snapshot.activeAvailability,
                 accessibilityGranted: snapshot.displayStatus.requiresPermission == false,
@@ -711,6 +711,7 @@ private struct SettingsAdvancedTab: View {
                 AdvancedBrowsersSection(
                     safariStatus: snapshot.safariExtensionStatus,
                     bridgeStatus: snapshot.browserBridgeStatus,
+                    bridgeInstallStatuses: snapshot.bridgeInstallStatuses,
                     diagnostics: snapshot.diagnostics,
                     actions: actions
                 )
@@ -745,6 +746,7 @@ private struct SettingsAdvancedTab: View {
 private struct AdvancedBrowsersSection: View {
     let safariStatus: SafariExtensionStatus
     let bridgeStatus: String
+    let bridgeInstallStatuses: [BridgeInstallStatus]
     let diagnostics: RuntimeDiagnosticSnapshot
     let actions: SettingsActions
 
@@ -764,6 +766,7 @@ private struct AdvancedBrowsersSection: View {
                 SettingsInfoRow("Chrome-family bridge", bridgeStatus)
                 SettingsInfoRow("Browser source", diagnostics.browserContextSource.title)
                 SettingsInfoRow("Web domain", diagnostics.webDomain ?? "None")
+                BridgeInstallStatusList(statuses: bridgeInstallStatuses)
             }
         }
     }
@@ -772,14 +775,6 @@ private struct AdvancedBrowsersSection: View {
 private struct AdvancedUpdatesSection: View {
     let updateStatus: UpdateStatus
     let actions: SettingsActions
-
-    @State private var automaticChecksEnabled: Bool
-
-    init(updateStatus: UpdateStatus, actions: SettingsActions) {
-        self.updateStatus = updateStatus
-        self.actions = actions
-        _automaticChecksEnabled = State(initialValue: updateStatus.automaticChecksEnabled)
-    }
 
     var body: some View {
         ShortyPanel {
@@ -790,16 +785,19 @@ private struct AdvancedUpdatesSection: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Toggle("Check for updates automatically", isOn: $automaticChecksEnabled)
-                    .onChange(of: automaticChecksEnabled) { nextValue in
-                        actions.setAutomaticUpdates(nextValue)
-                    }
+                Toggle(
+                    "Check for updates automatically",
+                    isOn: Binding(
+                        get: { updateStatus.automaticChecksEnabled },
+                        set: { actions.setAutomaticUpdates($0) }
+                    )
+                )
                 SettingsInfoRow("Current version", updateStatus.currentVersion)
                 SettingsInfoRow("Last checked", formatted(updateStatus.lastCheckedAt))
                 if let sourceURL = updateStatus.sourceURL {
                     Link("Source and release notes", destination: sourceURL)
                 }
-                Text("Manual update checks will appear here when Sparkle is bundled.")
+                Text("Direct-download update checks will use the signed release feed when Sparkle is bundled.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -813,6 +811,96 @@ private struct AdvancedUpdatesSection: View {
             dateStyle: .medium,
             timeStyle: .short
         )
+    }
+}
+
+private struct BridgeInstallStatusList: View {
+    let statuses: [BridgeInstallStatus]
+
+    private var visibleStatuses: [BridgeInstallStatus] {
+        statuses.filter { $0.browser != .safari }
+    }
+
+    var body: some View {
+        if !visibleStatuses.isEmpty {
+            Divider()
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Native messaging manifests")
+                    .font(.caption.weight(.semibold))
+                ForEach(visibleStatuses) { status in
+                    BridgeInstallStatusRow(status: status)
+                }
+                Text("Install or remove manifests with `just install-browser-bridge` and `just uninstall-browser-bridge` from a checkout. Shorty only reports status here.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private struct BridgeInstallStatusRow: View {
+    let status: BridgeInstallStatus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Label(status.browser.displayName, systemImage: iconName)
+                    .font(.caption)
+                    .foregroundColor(iconColor)
+                Spacer()
+                Text(stateTitle)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(iconColor)
+            }
+            Text(status.detail)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let manifestPath = status.manifestPath {
+                Text(manifestPath)
+                    .font(.caption2.monospaced())
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private var stateTitle: String {
+        switch status.state {
+        case .installed:
+            return "Installed"
+        case .notInstalled:
+            return "Not installed"
+        case .needsAttention:
+            return "Needs attention"
+        case .unsupported:
+            return "Unsupported"
+        }
+    }
+
+    private var iconName: String {
+        switch status.state {
+        case .installed:
+            return "checkmark.circle.fill"
+        case .needsAttention:
+            return "exclamationmark.triangle.fill"
+        case .notInstalled, .unsupported:
+            return "circle"
+        }
+    }
+
+    private var iconColor: Color {
+        switch status.state {
+        case .installed:
+            return ShortyBrand.teal
+        case .needsAttention:
+            return ShortyBrand.amber
+        case .notInstalled, .unsupported:
+            return .secondary
+        }
     }
 }
 
@@ -831,8 +919,12 @@ private struct AdvancedDiagnosticsSection: View {
                 SettingsInfoRow("Active app", diagnostics.currentAppName ?? "Unknown")
                 SettingsInfoRow("Effective app", diagnostics.effectiveAppID ?? "None")
                 SettingsInfoRow("Browser source", diagnostics.browserContextSource.title)
-                SettingsInfoRow("Events intercepted", "\(diagnostics.eventsIntercepted)")
-                SettingsInfoRow("Events translated", "\(diagnostics.eventsRemapped)")
+                SettingsInfoRow("Key events seen", "\(diagnostics.eventsIntercepted)")
+                SettingsInfoRow("Shortcuts matched", "\(diagnostics.eventsMatched)")
+                SettingsInfoRow("Key remaps", "\(diagnostics.eventsRemapped)")
+                SettingsInfoRow("Native pass-throughs", "\(diagnostics.eventsPassedThrough)")
+                SettingsInfoRow("Menu actions", "\(diagnostics.menuActionsInvoked)")
+                SettingsInfoRow("Accessibility actions", "\(diagnostics.accessibilityActionsInvoked)")
                 HStack {
                     Button("Export Support Bundle", action: actions.exportSupportBundle)
                     Button("Copy Diagnostics", action: actions.copySupportBundle)
@@ -910,135 +1002,6 @@ private struct AdvancedAboutSection: View {
     }
 }
 
-private struct SettingsBrowsersTab: View {
-    let safariStatus: SafariExtensionStatus
-    let bridgeStatus: String
-    let diagnostics: RuntimeDiagnosticSnapshot
-    let actions: SettingsActions
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ShortyPanel {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Safari")
-                        .font(.headline)
-                    SettingsInfoRow("Status", safariStatus.title)
-                    SettingsInfoRow("Extension ID", safariStatus.bundleIdentifier)
-                    SettingsInfoRow("Last domain", safariStatus.lastDomain ?? "None")
-                    Text(safariStatus.detail)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Button("Open Safari Extension Settings", action: actions.openSafariExtensionSettings)
-                }
-            }
-
-            ShortyPanel {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Chrome-family bridge")
-                        .font(.headline)
-                    SettingsInfoRow("Status", bridgeStatus)
-                    SettingsInfoRow("Browser source", diagnostics.browserContextSource.title)
-                    SettingsInfoRow("Web domain", diagnostics.webDomain ?? "None")
-                    Text("In-app install and uninstall will manage native messaging manifests for Chrome, Brave, Edge, Chromium, Vivaldi, and Chrome Canary.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Spacer()
-        }
-        .padding()
-    }
-}
-
-private struct SettingsUpdatesTab: View {
-    let updateStatus: UpdateStatus
-    let actions: SettingsActions
-
-    @State private var automaticChecksEnabled: Bool
-
-    init(updateStatus: UpdateStatus, actions: SettingsActions) {
-        self.updateStatus = updateStatus
-        self.actions = actions
-        _automaticChecksEnabled = State(initialValue: updateStatus.automaticChecksEnabled)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ShortyPanel {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(updateStatus.title)
-                        .font(.headline)
-                    Text(updateStatus.detail)
-                        .foregroundColor(.secondary)
-                    Toggle("Check for updates automatically", isOn: $automaticChecksEnabled)
-                        .onChange(of: automaticChecksEnabled) { nextValue in
-                            actions.setAutomaticUpdates(nextValue)
-                        }
-                    SettingsInfoRow("Current version", updateStatus.currentVersion)
-                    SettingsInfoRow("Last checked", formatted(updateStatus.lastCheckedAt))
-                    if let sourceURL = updateStatus.sourceURL {
-                        Link("Source and release notes", destination: sourceURL)
-                    }
-                    Button("Check for Updates", action: actions.checkForUpdates)
-                }
-            }
-            Spacer()
-        }
-        .padding()
-    }
-
-    private func formatted(_ date: Date?) -> String {
-        guard let date else { return "Never" }
-        return DateFormatter.localizedString(
-            from: date,
-            dateStyle: .medium,
-            timeStyle: .short
-        )
-    }
-}
-
-private struct SettingsDiagnosticsTab: View {
-    let diagnostics: RuntimeDiagnosticSnapshot
-    let actions: SettingsActions
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ShortyPanel {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Runtime diagnostics")
-                        .font(.headline)
-                    SettingsInfoRow("Engine", diagnostics.engineStatus)
-                    SettingsInfoRow("Permission", diagnostics.permissionState.rawValue)
-                    SettingsInfoRow("Active app", diagnostics.currentAppName ?? "Unknown")
-                    SettingsInfoRow("Effective app", diagnostics.effectiveAppID ?? "None")
-                    SettingsInfoRow("Browser source", diagnostics.browserContextSource.title)
-                    SettingsInfoRow("Events intercepted", "\(diagnostics.eventsIntercepted)")
-                    SettingsInfoRow("Events remapped", "\(diagnostics.eventsRemapped)")
-                    Button("Export Support Bundle", action: actions.exportSupportBundle)
-                }
-            }
-
-            if !diagnostics.adapterValidationMessages.isEmpty {
-                ShortyPanel {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Adapter warnings")
-                            .font(.headline)
-                        ForEach(diagnostics.adapterValidationMessages, id: \.self) { message in
-                            Text(message)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-            }
-
-            Spacer()
-        }
-        .padding()
-    }
-}
-
 private struct SettingsShortcutRow: View {
     let shortcut: CanonicalShortcut
 
@@ -1071,6 +1034,7 @@ private struct SettingsAdaptersTab: View {
     let validationMessages: [String]
     let generationMessage: String?
     let generatedPreview: Adapter?
+    let generatedReview: AdapterReview?
     let canonicalByID: [String: CanonicalShortcut]
     let activeAvailability: ShortcutAvailability
     let accessibilityGranted: Bool
@@ -1098,6 +1062,7 @@ private struct SettingsAdaptersTab: View {
             AdapterGenerationPanel(
                 message: generationMessage,
                 preview: generatedPreview,
+                review: generatedReview,
                 canonicalByID: canonicalByID,
                 accessibilityGranted: accessibilityGranted,
                 actions: actions
@@ -1238,6 +1203,7 @@ private struct ActiveAppCoveragePanel: View {
 private struct AdapterGenerationPanel: View {
     let message: String?
     let preview: Adapter?
+    let review: AdapterReview?
     let canonicalByID: [String: CanonicalShortcut]
     let accessibilityGranted: Bool
     let actions: SettingsActions
@@ -1277,6 +1243,10 @@ private struct AdapterGenerationPanel: View {
                 if let preview {
                     DisclosureGroup("Generated preview for \(preview.appName)") {
                         VStack(alignment: .leading, spacing: 8) {
+                            if let review {
+                                AdapterReviewSummary(review: review)
+                            }
+
                             ForEach(preview.mappings) { mapping in
                                 Text("\(canonicalName(for: mapping.canonicalID)): \(mappingDetail(mapping))")
                                     .font(.caption)
@@ -1300,6 +1270,50 @@ private struct AdapterGenerationPanel: View {
 
     private func canonicalName(for canonicalID: String) -> String {
         canonicalByID[canonicalID]?.name ?? canonicalID
+    }
+}
+
+private struct AdapterReviewSummary: View {
+    let review: AdapterReview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("Review confidence")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(confidenceText)
+                    .font(.caption.monospacedDigit())
+                    .foregroundColor(confidenceColor)
+            }
+
+            ForEach(review.reasons, id: \.self) { reason in
+                Label(reason, systemImage: "checkmark.circle")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            ForEach(review.warnings, id: \.self) { warning in
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.caption2)
+                    .foregroundColor(ShortyBrand.amber)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var confidenceText: String {
+        "\(Int((review.confidence * 100).rounded()))%"
+    }
+
+    private var confidenceColor: Color {
+        if review.confidence >= 0.75 {
+            return ShortyBrand.teal
+        }
+        if review.confidence >= 0.5 {
+            return ShortyBrand.amber
+        }
+        return .secondary
     }
 }
 
@@ -1363,117 +1377,10 @@ private struct AdapterSourcePill: View {
     }
 }
 
-private struct SettingsAboutTab: View {
-    let versionBuild: String
-    let engineStatus: String
-    let adapterCount: Int
-    let shortcutCount: Int
-    let accessibilityStatus: String
-    let browserBridgeStatus: String
-    let updateStatus: UpdateStatus
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                ShortyMarkView(size: 64)
-
-                Text("Shorty")
-                    .font(.title)
-                    .fontWeight(.bold)
-
-                Text("A local command map for macOS shortcuts.")
-                    .foregroundColor(.secondary)
-
-                Divider()
-
-                ShortyPanel {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("App")
-                            .font(.headline)
-                        SettingsInfoRow("Version", versionBuild)
-                        SettingsInfoRow("Engine", engineStatus)
-                        SettingsInfoRow("Adapters loaded", "\(adapterCount)")
-                        SettingsInfoRow("Canonical shortcuts", "\(shortcutCount)")
-                        SettingsInfoRow("Accessibility", accessibilityStatus)
-                        SettingsInfoRow("Browser bridge", browserBridgeStatus)
-                    }
-                }
-
-                ShortyPanel {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Open Source")
-                            .font(.headline)
-                        Text("Shorty is free software under the GNU Affero General Public License, version 3 or later.")
-                            .foregroundColor(.secondary)
-                        SettingsInfoRow("SPDX", "AGPL-3.0-or-later")
-                        SettingsInfoRow("Copyright", "Copyright (C) 2026 Peyton Randolph")
-                        Text("Shorty is provided without warranty, including without the implied warranty of merchantability or fitness for a particular purpose.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        HStack {
-                            if let sourceURL = updateStatus.sourceURL {
-                                Link("Source Code", destination: sourceURL)
-                            }
-                            if let licenseURL = OpenSourceLinks.license {
-                                Link("License", destination: licenseURL)
-                            }
-                            if let supportURL = OpenSourceLinks.support {
-                                Link("Support", destination: supportURL)
-                            }
-                            if let securityURL = OpenSourceLinks.security {
-                                Link("Security", destination: securityURL)
-                            }
-                        }
-                    }
-                }
-
-                ShortyPanel {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Attributions")
-                            .font(.headline)
-                        AttributionRow(
-                            title: "Runtime libraries",
-                            detail: "No third-party runtime libraries are bundled in Shorty.app."
-                        )
-                        AttributionRow(
-                            title: "System frameworks",
-                            detail: "Apple frameworks are provided by macOS and the Xcode SDK."
-                        )
-                        AttributionRow(
-                            title: "Development tools",
-                            detail: "Tuist, SwiftLint, uv, pytest, ruff, hk, mise, Prettier, shellcheck, shfmt, actionlint, zizmor, rumdl, and pkl are used for development and validation but are not bundled into the app."
-                        )
-                    }
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding()
-        }
-    }
-}
-
 private enum OpenSourceLinks {
     static let license = URL(string: "https://github.com/peyton/shorty/blob/master/LICENSE")
     static let support = URL(string: "mailto:shorty@peyton.app")
     static let security = URL(string: "mailto:shorty@peyton.app?subject=Shorty%20security")
-}
-
-private struct AttributionRow: View {
-    let title: String
-    let detail: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .fontWeight(.medium)
-            Text(detail)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
 }
 
 private struct SettingsInfoRow: View {
