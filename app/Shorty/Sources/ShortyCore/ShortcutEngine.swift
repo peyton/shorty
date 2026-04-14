@@ -23,6 +23,12 @@ public final class ShortcutEngine: ObservableObject {
     public var menuIntrospector: MenuIntrospector?
     public var browserBridge: BrowserBridge?
 
+    // MARK: - Translation feed & usage
+
+    public let translationFeed: TranslationFeed
+    public let undoStack = SettingsUndoStack()
+    @Published public var persistedSettings: PersistedSettingsState
+
     // MARK: - Published state
 
     @Published public private(set) var isRunning: Bool = false
@@ -41,6 +47,7 @@ public final class ShortcutEngine: ObservableObject {
     @Published public private(set) var adapterGenerationMessage: String?
     @Published public private(set) var globalPauseUntil: Date?
     @Published public private(set) var settingsFeedbackMessage: String?
+    @Published public private(set) var appScanResults: [AppScanResult]?
 
     /// Last error message kept for older UI callsites.
     @Published public var lastError: String?
@@ -72,6 +79,8 @@ public final class ShortcutEngine: ObservableObject {
         self.configuration = configuration
         self.userDefaults = userDefaults
         self.safariExtensionUserDefaults = safariExtensionUserDefaults
+        self.translationFeed = TranslationFeed(userDefaults: userDefaults)
+        self.persistedSettings = PersistedSettingsState.load(userDefaults: userDefaults)
         let loadedShortcutProfile = Self.loadShortcutProfile(userDefaults: userDefaults)
         self.shortcutProfile = loadedShortcutProfile
         self.globalPauseUntil = userDefaults.object(
@@ -105,6 +114,7 @@ public final class ShortcutEngine: ObservableObject {
             configuration: configuration
         )
         self.registry.applyShortcutProfile(loadedShortcutProfile)
+        self.eventTap.translationFeed = translationFeed
 
         DistributedNotificationCenter.default()
             .publisher(for: SafariExtensionBridge.notificationName)
@@ -466,6 +476,86 @@ public final class ShortcutEngine: ObservableObject {
             state: .idle,
             detail: "Opened Shorty's release page. Sparkle appcast checks will replace this when bundled."
         )
+    }
+
+    // MARK: - App scanning (#2, #27)
+
+    public func scanInstalledApps() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let results = AppScanner.scan(registry: self.registry)
+            DispatchQueue.main.async {
+                self.appScanResults = results
+            }
+        }
+    }
+
+    // MARK: - Batch operations (#15)
+
+    public func setAllShortcutsInCategory(
+        _ category: CanonicalShortcut.Category,
+        enabled: Bool
+    ) {
+        var next = shortcutProfile
+        for shortcut in next.shortcuts where shortcut.category == category {
+            next.setShortcut(shortcut.id, enabled: enabled)
+        }
+        applyShortcutProfile(next)
+        settingsFeedbackMessage = enabled
+            ? "Enabled all \(category.rawValue) shortcuts."
+            : "Disabled all \(category.rawValue) shortcuts."
+    }
+
+    public func resetAllShortcutsInCategory(_ category: CanonicalShortcut.Category) {
+        var next = shortcutProfile
+        for shortcut in next.shortcuts where shortcut.category == category {
+            next.resetShortcut(shortcut.id)
+            next.setShortcut(shortcut.id, enabled: true)
+        }
+        applyShortcutProfile(next)
+        settingsFeedbackMessage = "Reset all \(category.rawValue) shortcuts to defaults."
+    }
+
+    // MARK: - Settings persistence (#19)
+
+    public func updatePersistedSettings(_ update: (inout PersistedSettingsState) -> Void) {
+        update(&persistedSettings)
+        persistedSettings.save(userDefaults: userDefaults)
+    }
+
+    // MARK: - Undo (#16)
+
+    public func undoLastSettingsChange() {
+        guard let change = undoStack.pop() else { return }
+        switch change.kind {
+        case .shortcutEnabled(let id, let wasEnabled):
+            var next = shortcutProfile
+            next.setShortcut(id, enabled: wasEnabled)
+            shortcutProfile = next
+            registry.applyShortcutProfile(next)
+            persistShortcutProfile()
+        case .shortcutKeyCombo(let id, let previousKeys):
+            var next = shortcutProfile
+            next.updateShortcut(id, keyCombo: previousKeys)
+            shortcutProfile = next
+            registry.applyShortcutProfile(next)
+            persistShortcutProfile()
+        case .adapterEnabled(let appID, let wasEnabled):
+            var next = shortcutProfile
+            next.setAdapter(appID, enabled: wasEnabled)
+            shortcutProfile = next
+            registry.applyShortcutProfile(next)
+            persistShortcutProfile()
+        case .mappingEnabled(let adapterID, let canonicalID, let wasEnabled):
+            var next = shortcutProfile
+            next.setMapping(adapterID: adapterID, canonicalID: canonicalID, enabled: wasEnabled)
+            shortcutProfile = next
+            registry.applyShortcutProfile(next)
+            persistShortcutProfile()
+        case .adapterDeleted(let adapter):
+            try? registry.saveAutoAdapter(adapter)
+        }
+        settingsFeedbackMessage = "Undid: \(change.description)"
     }
 
     public func recordSafariExtensionMessage(domain: String) {

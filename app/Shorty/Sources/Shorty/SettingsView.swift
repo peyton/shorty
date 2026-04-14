@@ -8,8 +8,10 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @StateObject private var snapshotStore: SettingsSnapshotStore
     private let actions: SettingsActions
+    private let engine: ShortcutEngine
 
     init(engine: ShortcutEngine) {
+        self.engine = engine
         _snapshotStore = StateObject(wrappedValue: SettingsSnapshotStore(engine: engine))
         self.actions = .live(engine: engine)
     }
@@ -17,7 +19,11 @@ struct SettingsView: View {
     var body: some View {
         SettingsContentView(
             snapshot: snapshotStore.snapshot,
-            actions: actions
+            actions: actions,
+            undoStack: engine.undoStack,
+            appScanResults: engine.appScanResults,
+            onScanApps: { engine.scanInstalledApps() },
+            onUndoLast: { engine.undoLastSettingsChange() }
         )
     }
 }
@@ -79,6 +85,9 @@ private final class SettingsSnapshotStore: ObservableObject {
             self?.scheduleRefresh()
         }
         observe(engine.$adapterGenerationMessage) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
+        observe(engine.$appScanResults) { [weak self] _ in
             self?.scheduleRefresh()
         }
         observe(engine.$shortcutProfile) { [weak self] profile in
@@ -415,11 +424,16 @@ struct SettingsActions {
 struct SettingsContentView: View {
     let snapshot: SettingsSnapshot
     let actions: SettingsActions
+    var undoStack: SettingsUndoStack?
+    var appScanResults: [AppScanResult]?
+    var onScanApps: (() -> Void)?
+    var onUndoLast: (() -> Void)?
 
     @State private var selectedTab: SettingsTab
     @State private var selectedCategory: CanonicalShortcut.Category?
     @State private var shortcutSearch = ""
     @State private var adapterSearch = ""
+    @State private var globalSearch = ""
 
     private var canonicalByID: [String: CanonicalShortcut] {
         Dictionary(uniqueKeysWithValues: snapshot.shortcuts.map { ($0.id, $0) })
@@ -463,24 +477,57 @@ struct SettingsContentView: View {
         snapshot: SettingsSnapshot,
         actions: SettingsActions = .noop,
         initialTab: SettingsTab = .setup,
-        initialCategory: CanonicalShortcut.Category? = nil
+        initialCategory: CanonicalShortcut.Category? = nil,
+        undoStack: SettingsUndoStack? = nil,
+        appScanResults: [AppScanResult]? = nil,
+        onScanApps: (() -> Void)? = nil,
+        onUndoLast: (() -> Void)? = nil
     ) {
         self.snapshot = snapshot
         self.actions = actions
+        self.undoStack = undoStack
+        self.appScanResults = appScanResults
+        self.onScanApps = onScanApps
+        self.onUndoLast = onUndoLast
         _selectedTab = State(initialValue: initialTab)
         _selectedCategory = State(initialValue: initialCategory)
     }
 
+    private var globalSearchResults: [SettingsSearchResult] {
+        SettingsSearchIndex.search(
+            query: globalSearch,
+            shortcuts: snapshot.shortcuts,
+            adapters: snapshot.adapters
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            // Global search (#13)
+            GlobalSettingsSearchBar(
+                searchText: $globalSearch,
+                selectedTab: $selectedTab,
+                results: globalSearchResults
+            )
+
             if let feedback = snapshot.feedbackMessage, !feedback.isEmpty {
                 SettingsFeedbackBanner(message: feedback)
+            }
+
+            // Undo bar (#16)
+            if let undoStack, undoStack.canUndo {
+                UndoBar(
+                    description: undoStack.undoDescription,
+                    onUndo: { onUndoLast?() }
+                )
             }
 
             TabView(selection: $selectedTab) {
                 SettingsSetupTab(
                     snapshot: snapshot,
-                    actions: actions
+                    actions: actions,
+                    appScanResults: appScanResults,
+                    onScanApps: onScanApps
                 )
                 .tabItem {
                     Label("Setup", systemImage: "checklist")
@@ -535,6 +582,36 @@ struct SettingsContentView: View {
                 selectedTab = .setup
             }
         }
+        .background {
+            // Cmd+Z triggers undo (#16)
+            Button("") { onUndoLast?() }
+                .keyboardShortcut("z", modifiers: .command)
+                .hidden()
+        }
+    }
+}
+
+/// Undo bar shown below the feedback banner (#16).
+private struct UndoBar: View {
+    let description: String?
+    let onUndo: () -> Void
+
+    var body: some View {
+        HStack {
+            Image(systemName: "arrow.uturn.backward")
+                .foregroundColor(.secondary)
+            Text(description ?? "Undo last change")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Spacer()
+            Button("Undo (⌘Z)", action: onUndo)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.04))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Undo: \(description ?? "last change")")
     }
 }
 
@@ -556,6 +633,8 @@ private struct SettingsFeedbackBanner: View {
 private struct SettingsSetupTab: View {
     let snapshot: SettingsSnapshot
     let actions: SettingsActions
+    var appScanResults: [AppScanResult]?
+    var onScanApps: (() -> Void)?
 
     var body: some View {
         ScrollView {
@@ -601,6 +680,64 @@ private struct SettingsSetupTab: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                // App coverage scan (#2, #27)
+                ShortyPanel {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Your apps")
+                                .font(.headline)
+                            Spacer()
+                            if appScanResults == nil {
+                                Button("Scan Installed Apps") {
+                                    onScanApps?()
+                                }
+                                .controlSize(.small)
+                            }
+                        }
+
+                        if let results = appScanResults {
+                            let summary = AppScanner.scanSummary(results: results)
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading) {
+                                    Text("\(summary.coveredApps)")
+                                        .font(.title.weight(.bold))
+                                        .foregroundColor(ShortyBrand.teal)
+                                    Text("covered")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                VStack(alignment: .leading) {
+                                    Text("\(summary.uncoveredApps)")
+                                        .font(.title.weight(.bold))
+                                    Text("uncovered")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                VStack(alignment: .leading) {
+                                    Text("\(summary.coveragePercentage)%")
+                                        .font(.title.weight(.bold))
+                                        .foregroundColor(ShortyBrand.teal)
+                                    Text("coverage")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Button("Rescan") {
+                                    onScanApps?()
+                                }
+                                .controlSize(.small)
+                            }
+                            Text(summary.summaryText)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Scan your installed apps to see how many have keyboard shortcuts.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
             }
@@ -822,6 +959,9 @@ private struct SettingsAdvancedTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                // Preferences section (#10, #24, #25, #42)
+                AdvancedPreferencesSection()
+
                 AdvancedBrowsersSection(
                     safariStatus: snapshot.safariExtensionStatus,
                     bridgeStatus: snapshot.browserBridgeStatus,
@@ -855,6 +995,48 @@ private struct SettingsAdvancedTab: View {
             }
             .padding()
         }
+    }
+}
+
+/// User preference toggles for new features (#10, #24, #25, #42).
+private struct AdvancedPreferencesSection: View {
+    @State private var settings = PersistedSettingsState.load()
+
+    var body: some View {
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Preferences")
+                    .font(.headline)
+
+                Toggle("Show translation toasts", isOn: $settings.showTranslationToasts)
+                    .onChange(of: settings.showTranslationToasts) { _ in save() }
+                Text("Show brief notifications when Shorty translates a shortcut. Auto-disables after the first few uses.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Toggle("Compact popover", isOn: $settings.compactPopoverMode)
+                    .onChange(of: settings.compactPopoverMode) { _ in save() }
+                Text("Show a minimal status-only view in the menu bar popover.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Toggle("Translation sound", isOn: $settings.translationSoundEnabled)
+                    .onChange(of: settings.translationSoundEnabled) { _ in save() }
+                Text("Play a subtle sound when Shorty translates a shortcut.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Toggle("Weekly digest notification", isOn: $settings.weeklyDigestEnabled)
+                    .onChange(of: settings.weeklyDigestEnabled) { _ in save() }
+                Text("Receive a weekly summary of your shortcut usage.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private func save() {
+        settings.save()
     }
 }
 

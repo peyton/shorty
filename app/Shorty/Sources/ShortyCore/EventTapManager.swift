@@ -193,6 +193,9 @@ public final class EventTapManager: ObservableObject {
         }
     }
 
+    /// Optional translation feed for live UI updates and usage tracking.
+    public var translationFeed: TranslationFeed?
+
     // MARK: - Dependencies
 
     /// Resolves canonical shortcuts → native actions for a given app.
@@ -416,6 +419,13 @@ public final class EventTapManager: ObservableObject {
                 succeeded: true,
                 detail: "Remapped to \(nativeCombo.displayString)."
             )
+            emitTranslationEvent(
+                resolved: resolved,
+                appSnapshot: appSnapshot,
+                inputKeys: combo,
+                actionDescription: "Sends \(nativeCombo.displayString)",
+                succeeded: true
+            )
             // Mutate the event in place — change keycode and modifier flags.
             event.setIntegerValueField(.keyboardEventKeycode,
                                        value: Int64(nativeCombo.keyCode))
@@ -429,6 +439,13 @@ public final class EventTapManager: ObservableObject {
                 appSnapshot: appSnapshot,
                 succeeded: nil,
                 detail: "Queued menu action \(menuTitle)."
+            )
+            emitTranslationEvent(
+                resolved: resolved,
+                appSnapshot: appSnapshot,
+                inputKeys: combo,
+                actionDescription: "Menu: \(menuTitle)",
+                succeeded: nil
             )
             // Swallow the event and trigger the menu item via AX.
             let pid = appSnapshot.currentPID
@@ -447,6 +464,14 @@ public final class EventTapManager: ObservableObject {
                         ? "Invoked menu item \(menuTitle)."
                         : "Could not invoke menu item \(menuTitle)."
                 )
+                if !succeeded {
+                    self?.emitTranslationFailure(
+                        resolved: resolved,
+                        appSnapshot: appSnapshot,
+                        inputKeys: combo,
+                        actionDescription: "Could not invoke menu item \(menuTitle)."
+                    )
+                }
             }
             return nil // swallow
 
@@ -457,6 +482,13 @@ public final class EventTapManager: ObservableObject {
                 appSnapshot: appSnapshot,
                 succeeded: nil,
                 detail: "Queued Accessibility action \(action)."
+            )
+            emitTranslationEvent(
+                resolved: resolved,
+                appSnapshot: appSnapshot,
+                inputKeys: combo,
+                actionDescription: "Action: \(action)",
+                succeeded: nil
             )
             // Phase 2+ — placeholder for arbitrary AX actions.
             let pid = appSnapshot.currentPID
@@ -470,6 +502,14 @@ public final class EventTapManager: ObservableObject {
                         ? "Performed Accessibility action \(action)."
                         : "Could not perform Accessibility action \(action)."
                 )
+                if !succeeded {
+                    self?.emitTranslationFailure(
+                        resolved: resolved,
+                        appSnapshot: appSnapshot,
+                        inputKeys: combo,
+                        actionDescription: "Could not perform action \(action)."
+                    )
+                }
             }
             return nil
 
@@ -663,6 +703,53 @@ public final class EventTapManager: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.counters.merge(pending)
         }
+    }
+
+    // MARK: - Translation feed
+
+    private func emitTranslationEvent(
+        resolved: AdapterRegistry.ResolvedShortcutAction,
+        appSnapshot: AppMonitor.Snapshot,
+        inputKeys: KeyCombo,
+        actionDescription: String,
+        succeeded: Bool?
+    ) {
+        guard let feed = translationFeed else { return }
+        let canonicalName = registry.canonicalShortcuts.first { $0.id == resolved.canonicalID }?.name
+            ?? resolved.canonicalID
+        let event = TranslationEvent(
+            canonicalID: resolved.canonicalID,
+            canonicalName: canonicalName,
+            inputKeys: inputKeys,
+            appName: appSnapshot.currentAppName ?? "Unknown",
+            appIdentifier: resolved.appIdentifier,
+            actionKind: actionKind(for: resolved.mapping),
+            actionDescription: actionDescription,
+            succeeded: succeeded
+        )
+        feed.post(event)
+    }
+
+    private func emitTranslationFailure(
+        resolved: AdapterRegistry.ResolvedShortcutAction,
+        appSnapshot: AppMonitor.Snapshot,
+        inputKeys: KeyCombo,
+        actionDescription: String
+    ) {
+        guard let feed = translationFeed else { return }
+        let canonicalName = registry.canonicalShortcuts.first { $0.id == resolved.canonicalID }?.name
+            ?? resolved.canonicalID
+        let event = TranslationEvent(
+            canonicalID: resolved.canonicalID,
+            canonicalName: canonicalName,
+            inputKeys: inputKeys,
+            appName: appSnapshot.currentAppName ?? "Unknown",
+            appIdentifier: resolved.appIdentifier,
+            actionKind: actionKind(for: resolved.mapping),
+            actionDescription: actionDescription,
+            succeeded: false
+        )
+        feed.postFailure(event)
     }
 
     // MARK: - AX helpers (Phase 2 — basic implementations)
