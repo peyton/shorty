@@ -190,15 +190,28 @@ final class KeyComboTests: XCTestCase {
         let matcher = IntentMatcher()
         let canonical = CanonicalShortcut.defaults.first { $0.id == "focus_url_bar" }!
         let item = MenuIntrospector.DiscoveredMenuItem(
+            title: "Open Location",
+            menuPath: ["File", "Open Location"],
+            keyCombo: canonical.defaultKeys
+        )
+
+        let result = matcher.bestMatch(for: canonical, among: [item])
+        XCTAssertEqual(result?.item.title, "Open Location")
+        XCTAssertEqual(result?.reason, .exactKeyCombo)
+        XCTAssertGreaterThanOrEqual(result?.score ?? 0, IntentMatcher.minimumScore)
+    }
+
+    func testIntentMatcherRejectsUnrelatedExactKeyCombo() {
+        let matcher = IntentMatcher()
+        let canonical = CanonicalShortcut.defaults.first { $0.id == "focus_url_bar" }!
+        let item = MenuIntrospector.DiscoveredMenuItem(
             title: "Open Something Else",
             menuPath: ["File", "Open Something Else"],
             keyCombo: canonical.defaultKeys
         )
 
         let result = matcher.bestMatch(for: canonical, among: [item])
-        XCTAssertEqual(result?.item.title, "Open Something Else")
-        XCTAssertEqual(result?.reason, .exactKeyCombo)
-        XCTAssertGreaterThanOrEqual(result?.score ?? 0, IntentMatcher.minimumScore)
+        XCTAssertNil(result, "IntentMatcher should require semantic support for key combos")
     }
 
     func testIntentMatcherRejectsAmbiguousMatches() {
