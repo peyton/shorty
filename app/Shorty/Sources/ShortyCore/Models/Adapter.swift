@@ -5,7 +5,7 @@ import Foundation
 /// Each adapter targets a single application (by bundle ID) or web app
 /// (by domain). When the user presses a canonical shortcut while that app
 /// is frontmost, the engine looks up the mapping and executes the native action.
-public struct Adapter: Codable, Identifiable {
+public struct Adapter: Codable, Equatable, Identifiable {
     /// The app's bundle identifier (e.g., "com.microsoft.VSCode")
     /// or a web-app prefixed domain (e.g., "web:notion.so").
     public let appIdentifier: String
@@ -56,7 +56,7 @@ extension Adapter {
 
 extension Adapter {
     /// A single canonical → native translation within an adapter.
-    public struct Mapping: Codable, Identifiable {
+    public struct Mapping: Codable, Equatable, Identifiable {
         /// The canonical shortcut ID this mapping handles (e.g., "focus_url_bar").
         public let canonicalID: String
 

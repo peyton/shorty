@@ -78,10 +78,25 @@ def xcode_version_text() -> str:
     return result.stdout.strip()
 
 
-def check_xcode_is_stable(version_text: str, allow_beta: bool) -> None:
+def xcode_developer_dir() -> str:
+    result = subprocess.run(
+        ["xcode-select", "-p"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def check_xcode_is_stable(
+    version_text: str,
+    allow_beta: bool,
+    developer_dir: str | None = None,
+) -> None:
     if allow_beta:
         return
-    if "beta" in version_text.lower():
+    haystack = f"{version_text}\n{developer_dir or ''}".lower()
+    if "beta" in haystack:
         raise ReleasePreflightError(
             "Public releases must use a stable Xcode. Set SHORTY_ALLOW_BETA_XCODE=1 "
             "only for internal testing."
@@ -133,6 +148,7 @@ def run_preflight(
     check_xcode_is_stable(
         xcode_version_text(),
         allow_beta=env.get("SHORTY_ALLOW_BETA_XCODE") == "1",
+        developer_dir=xcode_developer_dir(),
     )
     check_signing_identity(env)
 

@@ -58,7 +58,7 @@ xcodebuild \
   build
 
 bridge_product="$derived_data_path/Build/Products/Release/$BRIDGE_SCHEME"
-install_dir="$REPO_ROOT/.build/browser-bridge"
+install_dir="${SHORTY_BROWSER_BRIDGE_INSTALL_DIR:-$HOME/Library/Application Support/Shorty/BrowserBridge}"
 bridge_path="$install_dir/shorty-bridge"
 
 if [ ! -x "$bridge_product" ]; then

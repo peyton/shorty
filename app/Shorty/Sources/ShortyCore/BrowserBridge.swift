@@ -346,7 +346,7 @@ public final class BrowserBridge: ObservableObject {
             guard let self else { return }
             guard self.lastDomain != domain else { return }
             self.lastDomain = domain
-            self.appMonitor?.webAppDomain = domain
+            self.appMonitor?.updateBrowserContext(domain: domain, source: .chromeBridge)
             self.status = .connected(domain)
         }
     }
@@ -355,7 +355,7 @@ public final class BrowserBridge: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.lastDomain = nil
-            self.appMonitor?.webAppDomain = nil
+            self.appMonitor?.clearBrowserContext(source: .chromeBridge)
             if self.isListening {
                 self.status = .listening(self.socketPath)
             }

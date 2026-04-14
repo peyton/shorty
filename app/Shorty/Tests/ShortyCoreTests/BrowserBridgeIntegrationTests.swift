@@ -26,6 +26,7 @@ final class BrowserBridgeIntegrationTests: XCTestCase {
 
         XCTAssertEqual(ack, #"{"type":"ack"}"#)
         XCTAssertTrue(waitFor(monitor.webAppDomain == "slack.com"))
+        XCTAssertEqual(monitor.browserContextSource, .chromeBridge)
         XCTAssertEqual(monitor.effectiveAppID, "web:slack.com")
         XCTAssertEqual(bridge.status, .connected("slack.com"))
     }
@@ -54,6 +55,7 @@ final class BrowserBridgeIntegrationTests: XCTestCase {
 
         XCTAssertEqual(ack, #"{"type":"ack"}"#)
         XCTAssertTrue(waitFor(monitor.webAppDomain == nil))
+        XCTAssertEqual(monitor.browserContextSource, .none)
         XCTAssertEqual(monitor.effectiveAppID, "com.google.Chrome")
         XCTAssertEqual(bridge.status, .listening(socketPath))
     }

@@ -62,7 +62,7 @@ Local install flow:
 just install-browser-bridge EXTENSION_ID=<chrome-extension-id> BROWSERS=chrome,brave,edge
 ```
 
-The install command validates the extension ID, builds `ShortyBridge`, copies it to `.build/browser-bridge/shorty-bridge`, and writes native messaging manifests under the selected browser Application Support directories.
+The install command validates the extension ID, builds `ShortyBridge`, copies it to `~/Library/Application Support/Shorty/BrowserBridge/shorty-bridge`, and writes native messaging manifests under the selected browser Application Support directories.
 
 Supported browser targets are `chrome`, `chrome-canary`, `chromium`, `brave`, `edge`, and `vivaldi`. Use `BROWSERS=all` for every supported manifest directory.
 
@@ -117,7 +117,13 @@ Release:
 - `just release-preflight VERSION=1.0.0` - verify a clean public release state.
 - `just app-package VERSION=1.0.0` - build, sign, zip, and checksum the app under `.build/releases/`.
 - `just app-notarize VERSION=1.0.0` - submit the app archive to Apple notarization, staple the app, and repackage it.
-- `just release VERSION=1.0.0` - run app packaging and release preflight.
+- `just dmg-package VERSION=1.0.0` - create a DMG with `Shorty.app` and an Applications shortcut.
+- `just safari-extension-verify` - verify the built app contains the Safari Web Extension bundle and manifest.
+- `just release-verify VERSION=1.0.0` - verify the zip, checksum, bundle version, and Safari extension contents.
+- `just appcast-generate VERSION=1.0.0 DOWNLOAD_URL=<url>` - generate a Sparkle appcast from the signed zip. Requires `SHORTY_SPARKLE_ED_SIGNATURE` for release use.
+- `just app-store-build` - build the sandboxed App Store candidate target.
+- `just app-store-validate` - verify the App Store candidate bundle composition and sandbox entitlement.
+- `just release VERSION=1.0.0` - run the strict Developer ID release lane: preflight, packaging, notarization, DMG, and strict verification. Use `LANE=app-store-candidate` for the secondary App Store candidate build.
 
 Web:
 
@@ -151,6 +157,6 @@ Repository:
 
 ## Release Notes
 
-Direct-download app archives are created under `.build/releases/` as `shorty-<version>-macos.zip` with a matching `.sha256` file. Notarization is optional and only runs when explicit Apple notarization credentials are supplied.
+Direct-download app archives are created under `.build/releases/` as `shorty-<version>-macos.zip` with a matching `.sha256` file. Public `just release` lanes require Developer ID signing, Apple notarization credentials, stapling, and strict verification; local `just app-package` builds can still use ad-hoc signing for development.
 
 Generated menu-introspection adapters are disabled by default for public release. Users can generate, preview, and save an adapter explicitly from Settings.

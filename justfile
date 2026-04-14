@@ -44,9 +44,36 @@ app-notarize VERSION='local':
     version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/app_notarize.sh --version "$version"
 
 [group('release')]
-release VERSION='local':
-    just app-package VERSION="{{VERSION}}"
-    just release-preflight VERSION="{{VERSION}}"
+dmg-package VERSION='local':
+    version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/dmg_package.sh --version "$version"
+
+[group('release')]
+release-verify VERSION='local':
+    version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/release_verify.sh --version "$version"
+
+[group('release')]
+safari-extension-verify:
+    bash scripts/tooling/safari_extension_verify.sh
+
+[group('release')]
+appcast-generate VERSION='local' DOWNLOAD_URL='':
+    version="{{VERSION}}"; version="${version#VERSION=}"; download_url="{{DOWNLOAD_URL}}"; download_url="${download_url#DOWNLOAD_URL=}"; bash scripts/tooling/appcast_generate.sh --version "$version" --download-url "$download_url"
+
+[group('release')]
+app-store-build:
+    bash scripts/tooling/app_store_build.sh
+
+[group('release')]
+app-store-validate:
+    bash scripts/tooling/app_store_validate.sh
+
+[group('release')]
+profile-energy PROFILE='idle':
+    profile="{{PROFILE}}"; profile="${profile#PROFILE=}"; bash scripts/tooling/energy_profile.sh "$profile"
+
+[group('release')]
+release VERSION='local' LANE='developer-id-with-safari':
+    version="{{VERSION}}"; version="${version#VERSION=}"; lane="{{LANE}}"; lane="${lane#LANE=}"; bash scripts/tooling/release_lane.sh --version "$version" --lane "$lane"
 
 [group('web')]
 web-serve PORT='8000':
