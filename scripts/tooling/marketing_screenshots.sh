@@ -62,9 +62,12 @@ assert_dimensions() {
   fi
 }
 
-assert_dimensions native-settings-shortcuts.png 1440 1120
-assert_dimensions native-settings-apps.png 1440 1120
-assert_dimensions native-status-popover.png 780 1040
+assert_dimensions native-settings-shortcuts.png 1680 1320
+assert_dimensions native-settings-apps.png 1680 1320
+assert_dimensions native-status-popover.png 1000 1280
+assert_dimensions native-status-permission.png 1000 1280
+assert_dimensions native-status-paused.png 1000 1280
+assert_dimensions native-status-no-adapter.png 1000 1280
 assert_dimensions app-store-shortcuts.png 2880 1800
 assert_dimensions app-store-apps.png 2880 1800
 assert_dimensions app-store-setup.png 2880 1800

@@ -97,6 +97,69 @@ public final class AdapterRegistry: ObservableObject {
         adapters[appID]?.mappings.count ?? 0
     }
 
+    public func availability(
+        for appID: String?,
+        displayName: String?
+    ) -> ShortcutAvailability {
+        guard let appID else {
+            return ShortcutAvailability(
+                state: .noActiveApp,
+                appIdentifier: nil,
+                appDisplayName: "Unknown"
+            )
+        }
+
+        guard let adapter = adapters[appID] else {
+            return ShortcutAvailability(
+                state: .noAdapter,
+                appIdentifier: appID,
+                appDisplayName: displayName ?? appID
+            )
+        }
+
+        let canonicalByID = Dictionary(
+            uniqueKeysWithValues: canonicalShortcuts.map { ($0.id, $0) }
+        )
+        let shortcuts = adapter.mappings
+            .compactMap { mapping -> AvailableShortcut? in
+                guard let canonical = canonicalByID[mapping.canonicalID] else {
+                    return nil
+                }
+                return AvailableShortcut(
+                    id: canonical.id,
+                    name: canonical.name,
+                    defaultKeys: canonical.defaultKeys,
+                    category: canonical.category,
+                    actionKind: actionKind(for: mapping),
+                    actionDescription: actionDescription(
+                        for: mapping,
+                        canonical: canonical,
+                        adapter: adapter
+                    ),
+                    nativeKeys: mapping.nativeKeys,
+                    menuTitle: mapping.menuTitle,
+                    axAction: mapping.axAction,
+                    adapterSource: adapter.source
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.category.availabilitySortOrder != rhs.category.availabilitySortOrder {
+                    return lhs.category.availabilitySortOrder < rhs.category.availabilitySortOrder
+                }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+
+        return ShortcutAvailability(
+            state: .available,
+            appIdentifier: appID,
+            appDisplayName: displayName ?? adapter.appName,
+            adapterIdentifier: adapter.appIdentifier,
+            adapterName: adapter.appName,
+            adapterSource: adapter.source,
+            shortcuts: shortcuts
+        )
+    }
+
     /// What the engine should do after resolving a canonical shortcut.
     public enum ResolvedAction: Equatable {
         /// Rewrite the event to this key combo.
@@ -107,6 +170,45 @@ public final class AdapterRegistry: ObservableObject {
         case performAXAction(String)
         /// Let the event pass through unmodified.
         case passthrough
+    }
+
+    private func actionKind(for mapping: Adapter.Mapping) -> AvailableShortcutActionKind {
+        switch mapping.method {
+        case .keyRemap:
+            return .keyRemap
+        case .menuInvoke:
+            return .menuInvoke
+        case .axAction:
+            return .axAction
+        case .passthrough:
+            return .passthrough
+        }
+    }
+
+    private func actionDescription(
+        for mapping: Adapter.Mapping,
+        canonical: CanonicalShortcut,
+        adapter: Adapter
+    ) -> String {
+        switch mapping.method {
+        case .keyRemap:
+            guard let nativeKeys = mapping.nativeKeys else {
+                return "Missing native shortcut"
+            }
+            return "Sends \(nativeKeys.displayString)"
+        case .menuInvoke:
+            guard let menuTitle = mapping.menuTitle else {
+                return "Missing menu item"
+            }
+            return "Chooses \(menuTitle)"
+        case .axAction:
+            guard let axAction = mapping.axAction else {
+                return "Missing Accessibility action"
+            }
+            return "Performs \(axAction)"
+        case .passthrough:
+            return "Uses \(canonical.defaultKeys.displayString) in \(adapter.appName)"
+        }
     }
 
     // MARK: - Adapter management

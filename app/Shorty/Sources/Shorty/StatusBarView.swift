@@ -22,13 +22,11 @@ struct StatusBarView: View {
 }
 
 struct StatusBarSnapshot {
-    let statusTitle: String
-    let statusDetail: String
-    let statusIsHealthy: Bool
+    let status: EngineDisplayStatus
     let currentAppName: String
-    let coverageText: String
+    let activeContextTitle: String
+    let availability: ShortcutAvailability
     let lifecycleMessage: String?
-    let requiresPermission: Bool
     let effectiveID: String
     let adapterSource: String
     let mappingCount: String
@@ -40,19 +38,32 @@ struct StatusBarSnapshot {
     let eventsIntercepted: Int
     let eventsRemapped: Int
     let validationMessages: [String]
+    let adapterGenerationMessage: String?
+    let hasGeneratedAdapterPreview: Bool
+
+    var requiresPermission: Bool {
+        status.requiresPermission
+    }
+
+    var statusTitle: String {
+        status.title
+    }
+
+    var statusDetail: String {
+        status.detail
+    }
+
+    var statusIsHealthy: Bool {
+        status.isHealthy
+    }
 
     static func live(engine: ShortcutEngine) -> StatusBarSnapshot {
         let appID = engine.appMonitor.effectiveAppID
-        let adapter = appID.flatMap { engine.registry.activeAdapter(for: $0) }
-
-        let coverageText: String
-        if !engine.eventTap.isEnabled {
-            coverageText = "Paused"
-        } else if let adapter {
-            coverageText = "\(adapter.mappings.count) shortcuts for \(adapter.appName)"
-        } else {
-            coverageText = "Pass through"
-        }
+        let activeTitle = activeContextTitle(engine: engine, appID: appID)
+        let availability = engine.registry.availability(
+            for: appID,
+            displayName: activeTitle
+        )
 
         let normalizedWebDomain: String
         if let domain = engine.appMonitor.webAppDomain {
@@ -62,16 +73,19 @@ struct StatusBarSnapshot {
         }
 
         return StatusBarSnapshot(
-            statusTitle: engine.status.title,
-            statusDetail: engine.status.detail,
-            statusIsHealthy: engine.status.isHealthy,
+            status: EngineDisplayStatus.make(
+                status: engine.status,
+                permissionState: engine.permissionState,
+                eventTapEnabled: engine.eventTap.isEnabled,
+                isWaitingForPermission: engine.isWaitingForAccessibilityPermission
+            ),
             currentAppName: engine.appMonitor.currentAppName ?? "Unknown",
-            coverageText: coverageText,
-            lifecycleMessage: engine.eventTap.lifecycleMessage,
-            requiresPermission: engine.status == .permissionRequired,
+            activeContextTitle: activeTitle,
+            availability: availability,
+            lifecycleMessage: importantLifecycleMessage(engine: engine),
             effectiveID: appID ?? "None",
-            adapterSource: adapter?.source.rawValue ?? "none",
-            mappingCount: adapter.map { "\($0.mappings.count)" } ?? "0",
+            adapterSource: availability.adapterSource?.statusLabel ?? "none",
+            mappingCount: "\(availability.shortcuts.count)",
             webDomain: normalizedWebDomain,
             browserContextSource: engine.appMonitor.browserContextSource.title,
             bridgeStatus: engine.browserBridge?.status.title ?? "Unavailable",
@@ -79,28 +93,52 @@ struct StatusBarSnapshot {
             shortcutReviewCount: engine.shortcutProfile.conflicts().count,
             eventsIntercepted: engine.eventTap.eventsIntercepted,
             eventsRemapped: engine.eventTap.eventsRemapped,
-            validationMessages: engine.registry.validationMessages
+            validationMessages: engine.registry.validationMessages,
+            adapterGenerationMessage: engine.adapterGenerationMessage,
+            hasGeneratedAdapterPreview: engine.generatedAdapterPreview != nil
         )
+    }
+
+    private static func activeContextTitle(
+        engine: ShortcutEngine,
+        appID: String?
+    ) -> String {
+        let appName = engine.appMonitor.currentAppName ?? "Unknown"
+        guard let domain = engine.appMonitor.webAppDomain,
+              let appID,
+              appID.hasPrefix("web:")
+        else {
+            return appName
+        }
+
+        let adapterName = engine.registry.activeAdapter(for: appID)?.appName
+            ?? DomainNormalizer.normalizedDomain(for: domain)
+        return "\(adapterName) in \(appName)"
+    }
+
+    private static func importantLifecycleMessage(engine: ShortcutEngine) -> String? {
+        guard engine.eventTap.isEnabled else { return nil }
+        return engine.eventTap.lifecycleMessage
     }
 }
 
 struct StatusBarActions {
     let openAccessibilitySettings: () -> Void
-    let checkAgain: () -> Void
+    let addCurrentApp: () -> Void
     let openSettings: () -> Void
     let quit: () -> Void
 
     static let noop = StatusBarActions(
         openAccessibilitySettings: {},
-        checkAgain: {},
+        addCurrentApp: {},
         openSettings: {},
         quit: {}
     )
 
     static func live(engine: ShortcutEngine) -> StatusBarActions {
         StatusBarActions(
-            openAccessibilitySettings: { ShortcutEngine.requestAccessibilityPermission() },
-            checkAgain: { engine.checkAccessibilityAndRetry() },
+            openAccessibilitySettings: { engine.openAccessibilitySettings() },
+            addCurrentApp: { engine.generateAdapterForCurrentApp() },
             openSettings: {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                 NSApp.activate(ignoringOtherApps: true)
@@ -118,205 +156,370 @@ struct StatusBarContentView: View {
     let eventTapEnabled: Binding<Bool>
     let actions: StatusBarActions
 
-    @State private var showsPermissionHelp: Bool
-    @State private var showsAdvancedDiagnostics: Bool
+    @State private var showsDetails: Bool
 
     init(
         snapshot: StatusBarSnapshot,
         eventTapEnabled: Binding<Bool>,
         actions: StatusBarActions = .noop,
-        showsPermissionHelp: Bool = false,
-        showsAdvancedDiagnostics: Bool = false
+        showsDetails: Bool = false
     ) {
         self.snapshot = snapshot
         self.eventTapEnabled = eventTapEnabled
         self.actions = actions
-        _showsPermissionHelp = State(initialValue: showsPermissionHelp)
-        _showsAdvancedDiagnostics = State(initialValue: showsAdvancedDiagnostics)
+        _showsDetails = State(initialValue: showsDetails)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            StatusBarHeader(snapshot: snapshot)
-            StatusSummarySection(snapshot: snapshot)
-            ActiveAppSection(snapshot: snapshot)
-            PermissionSection(
-                snapshot: snapshot,
-                showsPermissionHelp: $showsPermissionHelp,
-                actions: actions
-            )
-            Divider()
-            StatusControlsSection(
+        VStack(alignment: .leading, spacing: 14) {
+            StatusHeader(snapshot: snapshot)
+            PermissionBanner(snapshot: snapshot, actions: actions)
+            AvailableShortcutsSection(snapshot: snapshot, actions: actions)
+            TranslationControlSection(
                 snapshot: snapshot,
                 eventTapEnabled: eventTapEnabled
             )
-            AdvancedDiagnosticsSection(
-                snapshot: snapshot,
-                showsAdvancedDiagnostics: $showsAdvancedDiagnostics
-            )
+            DetailsSection(snapshot: snapshot, showsDetails: $showsDetails)
             StatusFooter(actions: actions)
         }
-        .padding()
-        .frame(width: 360)
+        .padding(16)
+        .frame(width: 430)
     }
 }
 
-private struct StatusBarHeader: View {
+private struct StatusHeader: View {
     let snapshot: StatusBarSnapshot
 
     var body: some View {
-        HStack(spacing: 10) {
-            ShortyMarkView(size: 38)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Shorty")
-                    .font(.headline)
-                Text("Command map")
+        HStack(alignment: .center, spacing: 12) {
+            ShortyMenuBarGlyph(status: engineStatusForGlyph)
+                .accessibilityLabel(snapshot.status.title)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(snapshot.status.title)
+                        .font(.headline)
+                    CoverageBadge(availability: snapshot.availability)
+                }
+                Text(snapshot.activeContextTitle)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             Spacer()
-            Circle()
-                .fill(snapshot.statusIsHealthy ? ShortyBrand.teal : ShortyBrand.amber)
-                .frame(width: 9, height: 9)
-                .accessibilityLabel(snapshot.statusTitle)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(snapshot.status.title), \(snapshot.activeContextTitle)")
+    }
+
+    private var engineStatusForGlyph: EngineStatus {
+        if snapshot.requiresPermission {
+            return .permissionRequired
+        }
+        if snapshot.status.title == "Paused" {
+            return .disabled
+        }
+        return snapshot.status.isHealthy ? .running : .failed(snapshot.status.detail)
     }
 }
 
-private struct StatusSummarySection: View {
-    let snapshot: StatusBarSnapshot
+private struct CoverageBadge: View {
+    let availability: ShortcutAvailability
 
     var body: some View {
-        ShortyPanel {
-            HStack(alignment: .top, spacing: 10) {
-                Image(
-                    systemName: snapshot.statusIsHealthy
-                        ? "checkmark.circle.fill"
-                        : "exclamationmark.triangle.fill"
-                )
-                .foregroundColor(snapshot.statusIsHealthy ? ShortyBrand.teal : ShortyBrand.amber)
-                .font(.callout)
+        Text(availability.coverageTitle)
+            .font(.caption.weight(.semibold))
+            .foregroundColor(foregroundColor)
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(backgroundColor, in: Capsule())
+            .accessibilityLabel("Coverage: \(availability.coverageTitle)")
+    }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(snapshot.statusTitle)
-                        .font(.callout)
-                        .fontWeight(.semibold)
-                    Text(snapshot.statusDetail)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+    private var foregroundColor: Color {
+        switch availability.state {
+        case .available:
+            return ShortyBrand.teal
+        case .noActiveApp, .noAdapter:
+            return .secondary
+        }
+    }
+
+    private var backgroundColor: Color {
+        switch availability.state {
+        case .available:
+            return ShortyBrand.teal.opacity(0.12)
+        case .noActiveApp, .noAdapter:
+            return Color.secondary.opacity(0.12)
         }
     }
 }
 
-private struct ActiveAppSection: View {
+private struct PermissionBanner: View {
     let snapshot: StatusBarSnapshot
-
-    var body: some View {
-        ShortyPanel {
-            VStack(alignment: .leading, spacing: 8) {
-                StatusInfoRow("Active app", snapshot.currentAppName)
-                StatusInfoRow("Coverage", snapshot.coverageText)
-                if let lifecycleMessage = snapshot.lifecycleMessage {
-                    Label(lifecycleMessage, systemImage: "arrow.clockwise")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-    }
-}
-
-private struct PermissionSection: View {
-    let snapshot: StatusBarSnapshot
-    @Binding var showsPermissionHelp: Bool
     let actions: StatusBarActions
 
     var body: some View {
         if snapshot.requiresPermission {
             ShortyPanel {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Button("Open Accessibility Settings", action: actions.openAccessibilitySettings)
-                            .buttonStyle(.borderedProminent)
-
-                        Button("Check Again", action: actions.checkAgain)
+                VStack(alignment: .leading, spacing: 10) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(snapshot.status.title)
+                                .font(.callout.weight(.semibold))
+                            Text(snapshot.status.detail)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } icon: {
+                        Image(systemName: "accessibility")
+                            .foregroundColor(ShortyBrand.amber)
                     }
-                    .controlSize(.small)
 
-                    DisclosureGroup("What Shorty needs", isExpanded: $showsPermissionHelp) {
-                        Text("Shorty uses macOS Accessibility permission to listen for your shortcut keys and translate them only for supported apps. It does not need a network service for native app shortcuts.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 4)
+                    HStack(spacing: 10) {
+                        Button(
+                            "Open Accessibility Settings",
+                            action: actions.openAccessibilitySettings
+                        )
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+
+                        if snapshot.status.isWaitingForPermission {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Watching for approval")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
-                    .font(.caption)
                 }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(snapshot.status.title)
         }
     }
 }
 
-private struct StatusControlsSection: View {
+private struct AvailableShortcutsSection: View {
     let snapshot: StatusBarSnapshot
-    let eventTapEnabled: Binding<Bool>
+    let actions: StatusBarActions
 
     var body: some View {
         ShortyPanel {
             VStack(alignment: .leading, spacing: 10) {
-                Toggle("Shorty enabled", isOn: eventTapEnabled)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .disabled(snapshot.requiresPermission)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Available now")
+                            .font(.callout.weight(.semibold))
+                        Text(snapshot.availability.coverageDetail)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                }
 
-                if !eventTapEnabled.wrappedValue {
-                    Text("Shorty is passing every shortcut through unchanged.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                switch snapshot.availability.state {
+                case .available:
+                    ShortcutList(shortcuts: snapshot.availability.shortcuts)
+                case .noActiveApp:
+                    EmptyShortcutState(
+                        title: "No app selected",
+                        detail: "Click into an app and Shorty will show its shortcuts here.",
+                        showsAddButton: false,
+                        actions: actions
+                    )
+                case .noAdapter:
+                    EmptyShortcutState(
+                        title: "No shortcuts for this app yet",
+                        detail: "Shorty will pass keys through until you add support for this app.",
+                        showsAddButton: !snapshot.requiresPermission,
+                        actions: actions
+                    )
+                }
+
+                if let message = snapshot.adapterGenerationMessage {
+                    AdapterGenerationMessage(
+                        message: message,
+                        hasPreview: snapshot.hasGeneratedAdapterPreview
+                    )
                 }
             }
         }
     }
 }
 
-private struct AdvancedDiagnosticsSection: View {
-    let snapshot: StatusBarSnapshot
-    @Binding var showsAdvancedDiagnostics: Bool
+private struct ShortcutList: View {
+    let shortcuts: [AvailableShortcut]
 
     var body: some View {
-        ShortyPanel {
-            DisclosureGroup("Advanced Diagnostics", isExpanded: $showsAdvancedDiagnostics) {
-                VStack(alignment: .leading, spacing: 8) {
-                    StatusInfoRow("Effective ID", snapshot.effectiveID)
-                    StatusInfoRow("Adapter source", snapshot.adapterSource)
-                    StatusInfoRow("Mappings", snapshot.mappingCount)
-                    StatusInfoRow("Web domain", snapshot.webDomain)
-                    StatusInfoRow("Browser source", snapshot.browserContextSource)
-                    StatusInfoRow("Bridge", snapshot.bridgeStatus)
-                    StatusInfoRow("Safari", snapshot.safariExtensionStatus)
-                    StatusInfoRow("Shortcut review", "\(snapshot.shortcutReviewCount)")
-                    StatusInfoRow("Intercepted", "\(snapshot.eventsIntercepted)")
-                    StatusInfoRow("Remapped", "\(snapshot.eventsRemapped)")
-
-                    if !snapshot.validationMessages.isEmpty {
-                        Text("Adapter validation warnings")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                        ForEach(snapshot.validationMessages, id: \.self) { message in
-                            Text(message)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                                .lineLimit(2)
-                        }
-                    }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(shortcuts) { shortcut in
+                    AvailableShortcutRow(shortcut: shortcut)
                 }
-                .padding(.top, 6)
             }
-            .font(.caption)
+            .padding(.vertical, 1)
         }
+        .frame(maxHeight: 260)
+    }
+}
+
+private struct AvailableShortcutRow: View {
+    let shortcut: AvailableShortcut
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            ShortcutKeyBadge(text: shortcut.defaultKeys.displayString)
+                .frame(minWidth: 58, alignment: .trailing)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(shortcut.name)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Text(shortcut.actionDescription)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 8)
+
+            ShortcutActionPill(kind: shortcut.actionKind)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(shortcut.name), \(shortcut.defaultKeys.displayString), \(shortcut.actionDescription)"
+        )
+    }
+}
+
+private struct ShortcutActionPill: View {
+    let kind: AvailableShortcutActionKind
+
+    var body: some View {
+        Text(kind.label)
+            .font(.caption2.weight(.semibold))
+            .foregroundColor(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.secondary.opacity(0.1), in: Capsule())
+    }
+}
+
+private struct EmptyShortcutState: View {
+    let title: String
+    let detail: String
+    let showsAddButton: Bool
+    let actions: StatusBarActions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: "keyboard.badge.ellipsis")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary)
+            Text(detail)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if showsAddButton {
+                Button("Add Current App", action: actions.addCurrentApp)
+                    .controlSize(.small)
+            }
+        }
+    }
+}
+
+private struct AdapterGenerationMessage: View {
+    let message: String
+    let hasPreview: Bool
+
+    var body: some View {
+        Label(
+            hasPreview ? "\(message) Open Apps settings to review it." : message,
+            systemImage: hasPreview ? "checkmark.circle" : "info.circle"
+        )
+        .font(.caption)
+        .foregroundColor(hasPreview ? ShortyBrand.teal : .secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct TranslationControlSection: View {
+    let snapshot: StatusBarSnapshot
+    let eventTapEnabled: Binding<Bool>
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Shortcut translation")
+                    .font(.caption.weight(.semibold))
+                Text(controlDetail)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Toggle("Shortcut translation", isOn: eventTapEnabled)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .disabled(snapshot.requiresPermission)
+                .accessibilityLabel("Shortcut translation")
+        }
+    }
+
+    private var controlDetail: String {
+        if snapshot.requiresPermission {
+            return "Blocked until Accessibility access is granted."
+        }
+        if eventTapEnabled.wrappedValue {
+            return "Ready for supported apps."
+        }
+        return "Paused by you."
+    }
+}
+
+private struct DetailsSection: View {
+    let snapshot: StatusBarSnapshot
+    @Binding var showsDetails: Bool
+
+    var body: some View {
+        DisclosureGroup("Details", isExpanded: $showsDetails) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let lifecycleMessage = snapshot.lifecycleMessage {
+                    Label(lifecycleMessage, systemImage: "arrow.clockwise")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                StatusInfoRow("Effective app", snapshot.effectiveID)
+                StatusInfoRow("Adapter", snapshot.adapterSource)
+                StatusInfoRow("Mappings", snapshot.mappingCount)
+                StatusInfoRow("Web domain", snapshot.webDomain)
+                StatusInfoRow("Browser source", snapshot.browserContextSource)
+                StatusInfoRow("Bridge", snapshot.bridgeStatus)
+                StatusInfoRow("Safari", snapshot.safariExtensionStatus)
+                StatusInfoRow("Shortcut review", "\(snapshot.shortcutReviewCount)")
+                StatusInfoRow("Intercepted", "\(snapshot.eventsIntercepted)")
+                StatusInfoRow("Translated", "\(snapshot.eventsRemapped)")
+
+                if !snapshot.validationMessages.isEmpty {
+                    Label(
+                        "\(snapshot.validationMessages.count) adapter warning\(snapshot.validationMessages.count == 1 ? "" : "s")",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundColor(ShortyBrand.amber)
+                }
+            }
+            .padding(.top, 6)
+        }
+        .font(.caption)
     }
 }
 
@@ -355,5 +558,22 @@ private struct StatusInfoRow: View {
                 .truncationMode(.middle)
         }
         .font(.caption)
+    }
+}
+
+private extension Adapter.Source {
+    var statusLabel: String {
+        switch self {
+        case .builtin:
+            return "Built-in"
+        case .menuIntrospection:
+            return "Generated"
+        case .llmGenerated:
+            return "Generated"
+        case .community:
+            return "Community"
+        case .user:
+            return "User"
+        }
     }
 }
