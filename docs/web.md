@@ -12,6 +12,8 @@ The static website lives in `web/` and uses plain HTML and CSS. It is intentiona
   - Formats HTML and CSS with Prettier.
 - `just web-build`
   - Validates the site and copies it to `.build/web/`.
+- `just marketing-screenshots`
+  - Builds the offscreen `ShortyScreenshots` macOS tool, renders native product states into `web/assets/screenshots/`, and validates PNG dimensions.
 - `just web-package VERSION=test`
   - Builds and packages `.build/web/` into `.build/releases/shorty-web-test.tar.gz` with a matching `.sha256` file.
 
@@ -26,6 +28,13 @@ archive. Keep the download language aligned with the app release tooling:
 
 Support copy should keep the browser bridge clearly optional. Native app
 shortcut remapping is the primary release path.
+
+## Marketing Screenshots
+
+The screenshot command does not use the live desktop. It renders SwiftUI/AppKit
+content into PNGs from fixed fixture states, so it is safe to regenerate while
+using the Mac. The App Store exports are 2880x1800 PNGs; web images are
+1600x1000 PNGs.
 
 ## Public Defaults
 

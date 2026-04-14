@@ -12,6 +12,7 @@
     <link rel="icon" href="/assets/app-icon.svg" type="image/svg+xml" />
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <div class="site-shell">
       <header class="topbar">
         <a class="brand" href="/" aria-label="Shorty home">
@@ -25,14 +26,14 @@
         </nav>
       </header>
 
-      <main>
+      <main id="main-content">
         <section class="hero" aria-labelledby="hero-title">
           <div>
             <p class="eyebrow">macOS menu bar shortcuts</p>
             <h1 id="hero-title">One shortcut set across your Mac.</h1>
             <p class="lede">
-              Shorty runs in the menu bar, watches the front app, and remaps a
-              small trusted set of shortcuts locally.
+              Shorty runs in the menu bar and translates the shortcuts you
+              already know for the app in front.
             </p>
             <div class="actions">
               <a
@@ -47,63 +48,74 @@
               a matching <code>.sha256</code> checksum file.
             </p>
           </div>
-          <div class="hero-art" aria-hidden="true">
+          <figure class="hero-art">
             <img
-              class="app-mark"
-              src="/assets/app-icon.svg"
-              alt=""
-              width="340"
-              height="340"
+              class="product-shot hero-shot"
+              src="/assets/screenshots/web-hero.png"
+              alt="Shorty settings and menu bar status showing shortcut translation."
+              width="1600"
+              height="1000"
             />
-          </div>
+          </figure>
         </section>
 
         <section class="section alt" aria-labelledby="flow-title">
-          <div class="section-inner">
-            <h2 id="flow-title">A direct download with a visible checksum.</h2>
-            <p class="section-copy">
-              Download the archive from the latest release, compare the SHA-256
-              line, then drag Shorty to Applications.
-            </p>
-            <div class="steps release-steps">
-              <article class="step">
-                <strong>Download</strong>
-                <p>
-                  Use the latest GitHub release asset named
-                  <code>shorty-&lt;version&gt;-macos.zip</code>.
-                </p>
-              </article>
-              <article class="step">
-                <strong>Verify</strong>
-                <p>
-                  Open the matching <code>.sha256</code> file and compare it
-                  with the archive before opening the app.
-                </p>
-              </article>
-              <article class="step">
-                <strong>Allow</strong>
-                <p>
-                  Grant Accessibility access when macOS asks so Shorty can read
-                  menus and install its keyboard event tap.
-                </p>
-              </article>
+          <div class="section-inner split visual-split">
+            <div>
+              <h2 id="flow-title">Local-first from the first launch.</h2>
+              <p class="section-copy">
+                Download the archive, compare the SHA-256 checksum, then grant
+                the one macOS permission Shorty needs for shortcut translation.
+              </p>
+              <div class="steps release-steps">
+                <article class="step">
+                  <strong>Download</strong>
+                  <p>
+                    Use the latest GitHub release asset named
+                    <code>shorty-&lt;version&gt;-macos.zip</code>.
+                  </p>
+                </article>
+                <article class="step">
+                  <strong>Verify</strong>
+                  <p>
+                    Compare the archive with the matching
+                    <code>.sha256</code> file before opening the app.
+                  </p>
+                </article>
+                <article class="step">
+                  <strong>Allow</strong>
+                  <p>
+                    Grant Accessibility access so Shorty can listen for
+                    shortcuts and translate supported actions.
+                  </p>
+                </article>
+              </div>
+              <div class="checksum-box" aria-label="Checksum command">
+                <span>Checksum command</span>
+                <code>shasum -a 256 shorty-&lt;version&gt;-macos.zip</code>
+              </div>
             </div>
-            <div class="checksum-box" aria-label="Checksum command">
-              <span>Checksum command</span>
-              <code>shasum -a 256 shorty-&lt;version&gt;-macos.zip</code>
-            </div>
+            <figure class="section-figure">
+              <img
+                class="product-shot"
+                src="/assets/screenshots/web-setup.png"
+                alt="Shorty setup screen with permission and checksum guidance."
+                width="1600"
+                height="1000"
+              />
+            </figure>
           </div>
         </section>
 
         <section class="section" aria-labelledby="shortcuts-title">
-          <div class="section-inner split">
+          <div class="section-inner split visual-split">
             <div>
               <h2 id="shortcuts-title">
                 Native first. Browser bridge optional.
               </h2>
               <p class="section-copy">
-                Shorty works without cloud services. Browser support is an
-                explicit install for supported Chrome-family browsers.
+                Built-in adapters cover native Mac apps. The browser bridge is
+                an explicit install for supported Chrome-family browsers.
               </p>
               <ul class="plain-list">
                 <li>Bundled native adapters load automatically.</li>
@@ -112,6 +124,27 @@
                   Browser domains are limited to supported web apps by default.
                 </li>
               </ul>
+            </div>
+            <figure class="section-figure">
+              <img
+                class="product-shot"
+                src="/assets/screenshots/web-apps.png"
+                alt="Shorty apps tab showing native and supported web app adapters."
+                width="1600"
+                height="1000"
+              />
+            </figure>
+          </div>
+        </section>
+
+        <section class="section alt" aria-labelledby="examples-title">
+          <div class="section-inner split">
+            <div>
+              <h2 id="examples-title">The same intent, app by app.</h2>
+              <p class="section-copy">
+                Shorty maps a small canonical shortcut set to the native command
+                each app already exposes.
+              </p>
             </div>
             <div class="shortcut-stack" aria-label="Example shortcut list">
               <div class="shortcut-row">
@@ -130,7 +163,7 @@
           </div>
         </section>
 
-        <section class="section alt" aria-labelledby="contact-title">
+        <section class="section" aria-labelledby="contact-title">
           <div class="section-inner">
             <h2 id="contact-title">Support paths are short.</h2>
             <p class="section-copy">
