@@ -63,7 +63,10 @@ private struct StatusIconView: View {
     @ObservedObject var engine: ShortcutEngine
 
     var body: some View {
-        ShortyMenuBarGlyph(status: engine.status)
+        Image(systemName: "keyboard")
+            .symbolRenderingMode(.monochrome)
+            .font(.system(size: 15, weight: .semibold))
+            .frame(width: 18, height: 18)
             .accessibilityLabel(engine.status.title)
             .help(engine.status.title)
     }
