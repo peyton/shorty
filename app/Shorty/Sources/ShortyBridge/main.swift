@@ -8,60 +8,6 @@ private enum BridgeExit: Error {
     case socketClosed
 }
 
-private func readExactly(from fileDescriptor: Int32, count: Int) -> Data? {
-    var data = Data(count: count)
-    var totalRead = 0
-
-    while totalRead < count {
-        let bytesRead = data.withUnsafeMutableBytes { buffer in
-            guard let baseAddress = buffer.baseAddress else {
-                return -1
-            }
-            return read(
-                fileDescriptor,
-                baseAddress.advanced(by: totalRead),
-                count - totalRead
-            )
-        }
-
-        if bytesRead == 0 {
-            return nil
-        }
-        if bytesRead < 0 {
-            return nil
-        }
-
-        totalRead += bytesRead
-    }
-
-    return data
-}
-
-private func writeAll(_ data: Data, to fileDescriptor: Int32) -> Bool {
-    var totalWritten = 0
-
-    while totalWritten < data.count {
-        let bytesWritten = data.withUnsafeBytes { buffer in
-            guard let baseAddress = buffer.baseAddress else {
-                return -1
-            }
-            return write(
-                fileDescriptor,
-                baseAddress.advanced(by: totalWritten),
-                data.count - totalWritten
-            )
-        }
-
-        if bytesWritten <= 0 {
-            return false
-        }
-
-        totalWritten += bytesWritten
-    }
-
-    return true
-}
-
 private func connectToShorty() throws -> Int32 {
     let fileDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
     guard fileDescriptor >= 0 else {
@@ -105,11 +51,11 @@ private func writeNativeMessage(_ json: String) {
     let payload = Data(json.utf8)
     var length = UInt32(payload.count).littleEndian
     let lengthData = Data(bytes: &length, count: 4)
-    _ = writeAll(lengthData + payload, to: STDOUT_FILENO)
+    _ = BrowserBridge.writeAll(lengthData + payload, to: STDOUT_FILENO)
 }
 
 private func forwardNextMessage() throws -> Bool {
-    guard let lengthData = readExactly(from: STDIN_FILENO, count: 4) else {
+    guard let lengthData = BrowserBridge.readExactly(from: STDIN_FILENO, count: 4) else {
         return false
     }
 
@@ -117,7 +63,7 @@ private func forwardNextMessage() throws -> Bool {
         throw BridgeExit.invalidLength
     }
 
-    guard let payload = readExactly(from: STDIN_FILENO, count: Int(length)) else {
+    guard let payload = BrowserBridge.readExactly(from: STDIN_FILENO, count: Int(length)) else {
         throw BridgeExit.socketClosed
     }
 
@@ -127,17 +73,17 @@ private func forwardNextMessage() throws -> Bool {
     let socket = try connectToShorty()
     defer { close(socket) }
 
-    guard writeAll(frame, to: socket),
-          let ackLengthData = readExactly(from: socket, count: 4),
+    guard BrowserBridge.writeAll(frame, to: socket),
+          let ackLengthData = BrowserBridge.readExactly(from: socket, count: 4),
           let ackLength = BrowserBridge.messageLength(from: Array(ackLengthData)),
-          let ackPayload = readExactly(from: socket, count: Int(ackLength))
+          let ackPayload = BrowserBridge.readExactly(from: socket, count: Int(ackLength))
     else {
         throw BridgeExit.socketClosed
     }
 
     var ackFrame = ackLengthData
     ackFrame.append(ackPayload)
-    guard writeAll(ackFrame, to: STDOUT_FILENO) else {
+    guard BrowserBridge.writeAll(ackFrame, to: STDOUT_FILENO) else {
         throw BridgeExit.socketClosed
     }
 

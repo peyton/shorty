@@ -1,30 +1,13 @@
+import Combine
+import Darwin
 import Foundation
 
-/// Phase 3: Native Messaging host that communicates with the Shorty
-/// browser extension to identify which web app the user is viewing.
+/// Native Messaging socket server used by the optional browser extension.
 ///
-/// ## Protocol
-///
-/// Chrome Native Messaging uses length-prefixed JSON over stdin/stdout:
-///   - 4 bytes: message length as little-endian uint32
-///   - N bytes: UTF-8 JSON payload
-///
-/// Inbound messages (from extension):
-///   `{ "type": "domain_changed", "domain": "slack.com" }`
-///
-/// Outbound messages (to extension):
-///   `{ "type": "ack" }`
-///
-/// ## Architecture
-///
-/// The BrowserBridge doesn't run as a separate process — it's a
-/// lightweight server that listens on a Unix domain socket. The actual
-/// native messaging host (`shorty-bridge`) is a tiny shim that reads
-/// Chrome's stdin protocol and forwards to this socket.
-///
-/// For the MVP, the shim connects to a local Unix domain socket and
-/// forwards Chrome's length-prefixed messages without interpretation.
-public final class BrowserBridge {
+/// Chrome-family browsers speak length-prefixed JSON to the `ShortyBridge`
+/// command-line target. That target forwards the same frames to this Unix
+/// domain socket so the app can update `AppMonitor.webAppDomain`.
+public final class BrowserBridge: ObservableObject {
     public enum NativeMessage: Equatable {
         case domainChanged(String)
     }
@@ -33,7 +16,22 @@ public final class BrowserBridge {
     public static let maxMessageLength: UInt32 = 1_000_000
 
     public static var defaultSocketPath: String {
-        NSTemporaryDirectory() + socketName
+        applicationSupportDirectory()
+            .appendingPathComponent(socketName)
+            .path
+    }
+
+    public static func applicationSupportDirectory(
+        fileManager: FileManager = .default
+    ) -> URL {
+        let appSupport = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+
+        return appSupport
+            .appendingPathComponent("Shorty", isDirectory: true)
+            .appendingPathComponent("Bridge", isDirectory: true)
     }
 
     public static func messageLength(from lengthBytes: [UInt8]) -> UInt32? {
@@ -53,34 +51,114 @@ public final class BrowserBridge {
         return length
     }
 
-    public static func decodeMessagePayload(_ payload: Data) -> NativeMessage? {
+    public static func decodeMessagePayload(
+        _ payload: Data,
+        reportAllDomains: Bool = false
+    ) -> NativeMessage? {
         guard let json = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
               let type = json["type"] as? String,
               type == "domain_changed",
-              let domain = json["domain"] as? String,
-              !domain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              let rawDomain = json["domain"] as? String,
+              !rawDomain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             return nil
         }
 
-        return .domainChanged(DomainNormalizer.normalizedDomain(for: domain))
+        let normalized = DomainNormalizer.normalizedDomain(for: rawDomain)
+        guard reportAllDomains || DomainNormalizer.supportedWebAppDomains.contains(normalized) else {
+            return nil
+        }
+
+        return .domainChanged(normalized)
     }
 
-    /// Reference to the app monitor — we update its `webAppDomain`.
+    public static func readExactly(
+        from fileDescriptor: Int32,
+        count: Int
+    ) -> Data? {
+        var data = Data(count: count)
+        var totalRead = 0
+
+        while totalRead < count {
+            let bytesRead = data.withUnsafeMutableBytes { buffer in
+                guard let baseAddress = buffer.baseAddress else {
+                    return -1
+                }
+                return read(
+                    fileDescriptor,
+                    baseAddress.advanced(by: totalRead),
+                    count - totalRead
+                )
+            }
+
+            if bytesRead == 0 {
+                return nil
+            }
+            if bytesRead < 0 {
+                if errno == EINTR {
+                    continue
+                }
+                return nil
+            }
+
+            totalRead += bytesRead
+        }
+
+        return data
+    }
+
+    public static func writeAll(_ data: Data, to fileDescriptor: Int32) -> Bool {
+        var totalWritten = 0
+
+        while totalWritten < data.count {
+            let bytesWritten = data.withUnsafeBytes { buffer in
+                guard let baseAddress = buffer.baseAddress else {
+                    return -1
+                }
+                return write(
+                    fileDescriptor,
+                    baseAddress.advanced(by: totalWritten),
+                    data.count - totalWritten
+                )
+            }
+
+            if bytesWritten < 0, errno == EINTR {
+                continue
+            }
+            if bytesWritten <= 0 {
+                return false
+            }
+
+            totalWritten += bytesWritten
+        }
+
+        return true
+    }
+
+    @Published public private(set) var status: BrowserBridgeStatus = .stopped
+
     private weak var appMonitor: AppMonitor?
-
-    /// Path to the Unix domain socket.
     private let socketPath: String
+    private let configuration: EngineConfiguration
+    private let fileManager: FileManager
 
-    /// Background thread for the listener.
     private var listenerThread: Thread?
     private var isListening = false
-
-    /// File descriptor for the socket.
     private var serverFD: Int32 = -1
+    private var lastDomain: String?
 
-    public init(appMonitor: AppMonitor) {
+    public var currentSocketPath: String {
+        socketPath
+    }
+
+    public init(
+        appMonitor: AppMonitor,
+        configuration: EngineConfiguration = .releaseDefault,
+        fileManager: FileManager = .default
+    ) {
         self.appMonitor = appMonitor
+        self.configuration = configuration
+        self.fileManager = fileManager
         self.socketPath = Self.defaultSocketPath
     }
 
@@ -88,34 +166,33 @@ public final class BrowserBridge {
         stop()
     }
 
-    // MARK: - Lifecycle
-
-    /// Start listening for connections from the native messaging shim.
     public func start() {
         guard !isListening else { return }
 
-        // Clean up stale socket
+        do {
+            try prepareSocketDirectory()
+        } catch {
+            setStatus(.failed("Could not prepare browser bridge directory: \(error.localizedDescription)"))
+            ShortyLog.browserBridge.error("Failed to prepare socket directory: \(error.localizedDescription)")
+            return
+        }
+
         unlink(socketPath)
 
-        // Create Unix domain socket
         serverFD = socket(AF_UNIX, SOCK_STREAM, 0)
         guard serverFD >= 0 else {
-            print("[BrowserBridge] Failed to create socket: \(errno)")
+            setStatus(.failed("Could not create browser bridge socket."))
+            ShortyLog.browserBridge.error("Failed to create socket: \(errno)")
             return
         }
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
-        let socketPathCapacity = MemoryLayout.size(ofValue: addr.sun_path)
-        socketPath.withCString { ptr in
-            withUnsafeMutableBytes(of: &addr.sun_path) { pathBytes in
-                guard let pathBuf = pathBytes.baseAddress?
-                        .assumingMemoryBound(to: CChar.self) else {
-                    return
-                }
-                strncpy(pathBuf, ptr, socketPathCapacity - 1)
-                pathBuf[socketPathCapacity - 1] = 0
-            }
+        guard copySocketPath(socketPath, into: &addr) else {
+            close(serverFD)
+            serverFD = -1
+            setStatus(.failed("Browser bridge socket path is too long."))
+            return
         }
 
         let bindResult = withUnsafePointer(to: &addr) { ptr in
@@ -124,20 +201,25 @@ public final class BrowserBridge {
             }
         }
         guard bindResult == 0 else {
-            print("[BrowserBridge] Failed to bind: \(errno)")
+            let message = "Could not bind browser bridge socket."
+            ShortyLog.browserBridge.error("\(message) errno=\(errno)")
             close(serverFD)
             serverFD = -1
+            setStatus(.failed(message))
             return
         }
 
         guard listen(serverFD, 5) == 0 else {
-            print("[BrowserBridge] Failed to listen: \(errno)")
+            let message = "Could not listen for browser bridge connections."
+            ShortyLog.browserBridge.error("\(message) errno=\(errno)")
             close(serverFD)
             serverFD = -1
+            setStatus(.failed(message))
             return
         }
 
         isListening = true
+        setStatus(.listening(socketPath))
 
         let thread = Thread { [weak self] in
             self?.acceptLoop()
@@ -148,7 +230,6 @@ public final class BrowserBridge {
         thread.start()
     }
 
-    /// Stop the listener and clean up.
     public func stop() {
         isListening = false
         if serverFD >= 0 {
@@ -157,9 +238,36 @@ public final class BrowserBridge {
         }
         unlink(socketPath)
         listenerThread = nil
+        setStatus(.stopped)
     }
 
-    // MARK: - Accept loop
+    private func prepareSocketDirectory() throws {
+        let directory = URL(fileURLWithPath: socketPath).deletingLastPathComponent()
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        try fileManager.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o700))],
+            ofItemAtPath: directory.path
+        )
+    }
+
+    private func copySocketPath(_ path: String, into address: inout sockaddr_un) -> Bool {
+        let capacity = MemoryLayout.size(ofValue: address.sun_path)
+        guard path.utf8.count < capacity else {
+            return false
+        }
+
+        path.withCString { ptr in
+            withUnsafeMutableBytes(of: &address.sun_path) { pathBytes in
+                guard let pathBuffer = pathBytes.baseAddress?
+                    .assumingMemoryBound(to: CChar.self) else {
+                    return
+                }
+                strncpy(pathBuffer, ptr, capacity - 1)
+                pathBuffer[capacity - 1] = 0
+            }
+        }
+        return true
+    }
 
     private func acceptLoop() {
         while isListening {
@@ -173,74 +281,75 @@ public final class BrowserBridge {
             }
 
             guard clientFD >= 0 else {
+                if errno == EINTR {
+                    continue
+                }
                 if isListening {
-                    usleep(100_000) // 100ms backoff on error
+                    ShortyLog.browserBridge.warning("accept failed: \(errno)")
+                    usleep(100_000)
                 }
                 continue
             }
 
-            // Handle this client on a background queue
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 self?.handleClient(fileDescriptor: clientFD)
             }
         }
     }
 
-    // MARK: - Client handler
-
     private func handleClient(fileDescriptor: Int32) {
         defer { close(fileDescriptor) }
 
-        // Read loop: Chrome native messaging format
-        // (4-byte LE length prefix + JSON payload)
         while isListening {
-            // Read 4-byte length
-            var lengthBytes = [UInt8](repeating: 0, count: 4)
-            let lenRead = lengthBytes.withUnsafeMutableBytes { buffer in
-                guard let baseAddress = buffer.baseAddress else { return -1 }
-                return read(fileDescriptor, baseAddress, 4)
+            guard let lengthData = Self.readExactly(from: fileDescriptor, count: 4) else {
+                return
             }
-            guard lenRead == 4 else { return }
-
-            guard let length = Self.messageLength(from: lengthBytes) else { return }
-
-            // Read payload
-            var payload = [UInt8](repeating: 0, count: Int(length))
-            var totalRead = 0
-            while totalRead < Int(length) {
-                let bytesRead = payload.withUnsafeMutableBytes { buffer in
-                    guard let baseAddress = buffer.baseAddress else { return -1 }
-                    return read(
-                        fileDescriptor,
-                        baseAddress.advanced(by: totalRead),
-                        Int(length) - totalRead
-                    )
-                }
-                guard bytesRead > 0 else { return }
-                totalRead += bytesRead
+            guard let length = Self.messageLength(from: Array(lengthData)) else {
+                ShortyLog.browserBridge.warning("Rejected invalid native message length")
+                return
+            }
+            guard let payload = Self.readExactly(from: fileDescriptor, count: Int(length)) else {
+                return
             }
 
-            if let message = Self.decodeMessagePayload(Data(payload)),
-               case .domainChanged(let domain) = message {
-                DispatchQueue.main.async { [weak self] in
-                    self?.appMonitor?.webAppDomain = domain
-                }
+            if let message = Self.decodeMessagePayload(
+                payload,
+                reportAllDomains: configuration.reportAllBrowserDomains
+            ), case .domainChanged(let domain) = message {
+                setDomain(domain)
             }
 
-            sendAck(to: fileDescriptor)
+            guard sendAck(to: fileDescriptor) else {
+                setStatus(.failed("Could not acknowledge browser bridge message."))
+                return
+            }
         }
     }
 
-    private func sendAck(to fileDescriptor: Int32) {
-        let ack = #"{"type":"ack"}"#
-        let ackData = Array(ack.utf8)
-        var ackLen = UInt32(ackData.count).littleEndian
-        withUnsafeBytes(of: &ackLen) { buf in
-            guard let baseAddress = buf.baseAddress else { return }
-            _ = write(fileDescriptor, baseAddress, 4)
+    private func setDomain(_ domain: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard self.lastDomain != domain else { return }
+            self.lastDomain = domain
+            self.appMonitor?.webAppDomain = domain
+            self.status = .connected(domain)
         }
-        _ = ackData.withUnsafeBufferPointer { buf in
-            write(fileDescriptor, buf.baseAddress!, ackData.count)
+    }
+
+    private func sendAck(to fileDescriptor: Int32) -> Bool {
+        let ack = Data(#"{"type":"ack"}"#.utf8)
+        var ackLength = UInt32(ack.count).littleEndian
+        let lengthData = Data(bytes: &ackLength, count: 4)
+        return Self.writeAll(lengthData + ack, to: fileDescriptor)
+    }
+
+    private func setStatus(_ newStatus: BrowserBridgeStatus) {
+        if Thread.isMainThread {
+            status = newStatus
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.status = newStatus
+            }
         }
     }
 }

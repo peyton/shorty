@@ -19,7 +19,6 @@
       chrome.runtime.sendMessage({
         type: "domain_changed_from_content",
         domain: current,
-        url: location.href,
       });
     }
   }

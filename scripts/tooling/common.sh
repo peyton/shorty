@@ -50,7 +50,7 @@ run_in_app() {
 }
 
 generate_workspace() {
-  run_in_app run_mise_exec tuist generate --no-open
+  run_in_app run_mise_exec tuist generate --no-open --cache-profile none
 }
 
 workspace_is_generated() {

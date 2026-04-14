@@ -27,6 +27,7 @@ import CoreGraphics
 /// context. We pass `self` as the `userInfo` void pointer, then recover
 /// it inside the callback with `Unmanaged.fromOpaque`.
 public final class EventTapManager: ObservableObject {
+    public static let enabledDefaultsKey = "Shorty.EventTap.Enabled"
 
     // MARK: - Published state
 
@@ -39,9 +40,13 @@ public final class EventTapManager: ObservableObject {
     /// Cumulative count of events that were actually remapped.
     @Published public private(set) var eventsRemapped: Int = 0
 
+    /// Last lifecycle note, such as macOS temporarily disabling the tap.
+    @Published public private(set) var lifecycleMessage: String?
+
     /// Whether the tap is enabled (user toggle).
-    @Published public var isEnabled: Bool = true {
+    @Published public var isEnabled: Bool {
         didSet {
+            userDefaults.set(isEnabled, forKey: Self.enabledDefaultsKey)
             if isEnabled {
                 enableTap()
             } else {
@@ -58,6 +63,8 @@ public final class EventTapManager: ObservableObject {
     /// Provides the current frontmost app identifier.
     private let appMonitor: AppMonitor
 
+    private let userDefaults: UserDefaults
+
     // MARK: - Event tap internals
 
     /// The Quartz event tap (mach port).
@@ -72,11 +79,27 @@ public final class EventTapManager: ObservableObject {
     /// Background thread that owns the run loop.
     private var tapThread: Thread?
 
+    private let diagnosticsLock = NSLock()
+    private let diagnosticsQueue = DispatchQueue(label: "com.shorty.eventtap.diagnostics")
+    private var diagnosticsTimer: DispatchSourceTimer?
+    private var pendingEventsIntercepted: Int = 0
+    private var pendingEventsRemapped: Int = 0
+
     // MARK: - Init / Deinit
 
-    public init(registry: AdapterRegistry, appMonitor: AppMonitor) {
+    public init(
+        registry: AdapterRegistry,
+        appMonitor: AppMonitor,
+        userDefaults: UserDefaults = .standard
+    ) {
         self.registry = registry
         self.appMonitor = appMonitor
+        self.userDefaults = userDefaults
+        if userDefaults.object(forKey: Self.enabledDefaultsKey) == nil {
+            self.isEnabled = true
+        } else {
+            self.isEnabled = userDefaults.bool(forKey: Self.enabledDefaultsKey)
+        }
     }
 
     deinit {
@@ -93,6 +116,7 @@ public final class EventTapManager: ObservableObject {
     @discardableResult
     public func start() -> Bool {
         guard eventTap == nil else { return true } // already running
+        lifecycleMessage = nil
 
         // The events we care about: keyDown, keyUp, flagsChanged.
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
@@ -111,6 +135,7 @@ public final class EventTapManager: ObservableObject {
             userInfo: selfPtr
         ) else {
             // Most likely: user hasn't granted Accessibility permission.
+            ShortyLog.eventTap.error("Failed to create CGEvent tap")
             return false
         }
 
@@ -121,6 +146,7 @@ public final class EventTapManager: ObservableObject {
         ) else {
             CGEvent.tapEnable(tap: tap, enable: false)
             eventTap = nil
+            ShortyLog.eventTap.error("Failed to create event tap run-loop source")
             return false
         }
 
@@ -140,8 +166,14 @@ public final class EventTapManager: ObservableObject {
         tapThread = thread
         thread.start()
 
+        if !isEnabled {
+            CGEvent.tapEnable(tap: tap, enable: false)
+        }
+        startDiagnosticsFlush()
+
         DispatchQueue.main.async { [weak self] in
-            self?.isActive = true
+            guard let self else { return }
+            self.isActive = self.isEnabled
         }
 
         return true
@@ -149,6 +181,7 @@ public final class EventTapManager: ObservableObject {
 
     /// Tear down the event tap and stop the background thread.
     public func stop() {
+        stopDiagnosticsFlush()
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
@@ -173,11 +206,17 @@ public final class EventTapManager: ObservableObject {
     private func enableTap() {
         guard let tap = eventTap else { return }
         CGEvent.tapEnable(tap: tap, enable: true)
+        DispatchQueue.main.async { [weak self] in
+            self?.isActive = true
+        }
     }
 
     private func disableTap() {
         guard let tap = eventTap else { return }
         CGEvent.tapEnable(tap: tap, enable: false)
+        DispatchQueue.main.async { [weak self] in
+            self?.isActive = false
+        }
     }
 
     // MARK: - Event handling (called from the C callback)
@@ -196,6 +235,15 @@ public final class EventTapManager: ObservableObject {
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
+            let message = type == .tapDisabledByTimeout
+                ? "Keyboard tap restarted after macOS paused it."
+                : "Keyboard tap restarted after user input disabled it."
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.lifecycleMessage = message
+                self.isActive = self.isEnabled
+            }
+            ShortyLog.eventTap.warning("\(message)")
             return event
         }
 
@@ -216,23 +264,17 @@ public final class EventTapManager: ObservableObject {
             return event
         }
 
-        DispatchQueue.main.async { [weak self] in
-            self?.eventsIntercepted += 1
-        }
-
         switch resolved {
         case .remap(let nativeCombo):
+            recordEvent(remapped: true)
             // Mutate the event in place — change keycode and modifier flags.
             event.setIntegerValueField(.keyboardEventKeycode,
                                        value: Int64(nativeCombo.keyCode))
             event.flags = nativeCombo.cgFlags
-
-            DispatchQueue.main.async { [weak self] in
-                self?.eventsRemapped += 1
-            }
             return event
 
         case .invokeMenu(let menuTitle):
+            recordEvent(remapped: false)
             // Swallow the event and trigger the menu item via AX.
             let pid = appMonitor.currentPID
             DispatchQueue.global(qos: .userInitiated).async {
@@ -241,6 +283,7 @@ public final class EventTapManager: ObservableObject {
             return nil // swallow
 
         case .performAXAction(let action):
+            recordEvent(remapped: false)
             // Phase 2+ — placeholder for arbitrary AX actions.
             let pid = appMonitor.currentPID
             DispatchQueue.global(qos: .userInitiated).async {
@@ -249,7 +292,51 @@ public final class EventTapManager: ObservableObject {
             return nil
 
         case .passthrough:
+            recordEvent(remapped: false)
             return event
+        }
+    }
+
+    // MARK: - Diagnostics
+
+    private func recordEvent(remapped: Bool) {
+        diagnosticsLock.lock()
+        pendingEventsIntercepted += 1
+        if remapped {
+            pendingEventsRemapped += 1
+        }
+        diagnosticsLock.unlock()
+    }
+
+    private func startDiagnosticsFlush() {
+        guard diagnosticsTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: diagnosticsQueue)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in
+            self?.flushDiagnostics()
+        }
+        diagnosticsTimer = timer
+        timer.resume()
+    }
+
+    private func stopDiagnosticsFlush() {
+        diagnosticsTimer?.cancel()
+        diagnosticsTimer = nil
+        flushDiagnostics()
+    }
+
+    private func flushDiagnostics() {
+        diagnosticsLock.lock()
+        let intercepted = pendingEventsIntercepted
+        let remapped = pendingEventsRemapped
+        pendingEventsIntercepted = 0
+        pendingEventsRemapped = 0
+        diagnosticsLock.unlock()
+
+        guard intercepted > 0 || remapped > 0 else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.eventsIntercepted += intercepted
+            self?.eventsRemapped += remapped
         }
     }
 

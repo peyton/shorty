@@ -1,70 +1,180 @@
-import SwiftUI
+import AppKit
 import ShortyCore
+import SwiftUI
 
-/// The popover view shown when the user clicks the menu bar icon.
 struct StatusBarView: View {
     @ObservedObject var engine: ShortcutEngine
+    @State private var showsPermissionHelp = false
+    @State private var showsAdvancedDiagnostics = false
+
+    private var adapter: Adapter? {
+        guard let appID = engine.appMonitor.effectiveAppID else {
+            return nil
+        }
+        return engine.registry.activeAdapter(for: appID)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack {
-                Image(systemName: "keyboard.fill")
-                    .font(.title2)
-                Text("Shorty")
-                    .font(.headline)
-                Spacer()
-                Circle()
-                    .fill(engine.isRunning ? Color.green : Color.red)
-                    .frame(width: 8, height: 8)
-            }
-
+        VStack(alignment: .leading, spacing: 14) {
+            header
             Divider()
-
-            // Status
-            if let error = engine.lastError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                    .font(.caption)
-
-                Button("Open Accessibility Settings") {
-                    ShortcutEngine.requestAccessibilityPermission()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            } else {
-                RuntimeDiagnosticsView(
-                    appMonitor: engine.appMonitor,
-                    registry: engine.registry,
-                    eventTap: engine.eventTap
-                )
-            }
-
+            statusSummary
+            activeAppSummary
+            permissionActions
             Divider()
-
-            // Controls
-            Toggle("Enabled", isOn: eventTapEnabledBinding)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-
-            HStack {
-                Button("Settings…") {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")),
-                                     to: nil, from: nil)
-                    // Bring our app to front so the settings window is visible.
-                    NSApp.activate(ignoringOtherApps: true)
-                }
-
-                Spacer()
-
-                Button("Quit") {
-                    engine.stop()
-                    NSApp.terminate(nil)
-                }
-            }
+            controls
+            advancedDiagnostics
+            footer
         }
         .padding()
-        .frame(width: 320)
+        .frame(width: 340)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "keyboard.fill")
+                .font(.title2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Shorty")
+                    .font(.headline)
+                Text("Shortcut translation")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Circle()
+                .fill(engine.status.isHealthy ? Color.green : Color.orange)
+                .frame(width: 9, height: 9)
+                .accessibilityLabel(engine.status.title)
+        }
+    }
+
+    private var statusSummary: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(engine.status.title)
+                .font(.callout)
+                .fontWeight(.semibold)
+            Text(engine.status.detail)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var activeAppSummary: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            infoRow("Active app", engine.appMonitor.currentAppName ?? "Unknown")
+            infoRow("Coverage", coverageText)
+            if let lifecycleMessage = engine.eventTap.lifecycleMessage {
+                Label(lifecycleMessage, systemImage: "arrow.clockwise")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var permissionActions: some View {
+        if engine.status == .permissionRequired {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Button("Open Accessibility Settings") {
+                        ShortcutEngine.requestAccessibilityPermission()
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Check Again") {
+                        engine.checkAccessibilityAndRetry()
+                    }
+                }
+                .controlSize(.small)
+
+                DisclosureGroup("What Shorty needs", isExpanded: $showsPermissionHelp) {
+                    Text("Shorty uses macOS Accessibility permission to listen for your shortcut keys and translate them only for supported apps. It does not need a network service for native app shortcuts.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                }
+                .font(.caption)
+            }
+        }
+    }
+
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Shorty enabled", isOn: eventTapEnabledBinding)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .disabled(engine.status == .permissionRequired)
+
+            if !engine.eventTap.isEnabled {
+                Text("Shorty is passing every shortcut through unchanged.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private var advancedDiagnostics: some View {
+        DisclosureGroup("Advanced Diagnostics", isExpanded: $showsAdvancedDiagnostics) {
+            VStack(alignment: .leading, spacing: 8) {
+                infoRow("Effective ID", engine.appMonitor.effectiveAppID ?? "None")
+                infoRow("Adapter source", adapter?.source.rawValue ?? "none")
+                infoRow("Mappings", adapter.map { "\($0.mappings.count)" } ?? "0")
+                infoRow("Web domain", normalizedWebDomain)
+                infoRow("Bridge", engine.browserBridge?.status.title ?? "Unavailable")
+                infoRow("Intercepted", "\(engine.eventTap.eventsIntercepted)")
+                infoRow("Remapped", "\(engine.eventTap.eventsRemapped)")
+
+                if !engine.registry.validationMessages.isEmpty {
+                    Text("Adapter validation warnings")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    ForEach(engine.registry.validationMessages, id: \.self) { message in
+                        Text(message)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+            }
+            .padding(.top, 6)
+        }
+        .font(.caption)
+    }
+
+    private var footer: some View {
+        HStack {
+            Button("Settings...") {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+
+            Spacer()
+
+            Button("Quit") {
+                engine.stop()
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
+    private var coverageText: String {
+        if !engine.eventTap.isEnabled {
+            return "Paused"
+        }
+        guard let adapter else {
+            return "Pass through"
+        }
+        return "\(adapter.mappings.count) shortcuts for \(adapter.appName)"
+    }
+
+    private var normalizedWebDomain: String {
+        guard let domain = engine.appMonitor.webAppDomain else {
+            return "None"
+        }
+        return DomainNormalizer.normalizedDomain(for: domain)
     }
 
     private var eventTapEnabledBinding: Binding<Bool> {
@@ -73,51 +183,10 @@ struct StatusBarView: View {
             set: { engine.eventTap.isEnabled = $0 }
         )
     }
-}
 
-// MARK: - Runtime diagnostics
-
-private struct RuntimeDiagnosticsView: View {
-    @ObservedObject var appMonitor: AppMonitor
-    @ObservedObject var registry: AdapterRegistry
-    @ObservedObject var eventTap: EventTapManager
-
-    private var adapter: Adapter? {
-        guard let appID = appMonitor.effectiveAppID else {
-            return nil
-        }
-        return registry.activeAdapter(for: appID)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            diagnosticRow("Active app", appMonitor.currentAppName ?? "—")
-            diagnosticRow("Effective ID", appMonitor.effectiveAppID ?? "—")
-            diagnosticRow("Adapter", adapter?.appName ?? "Pass through")
-            diagnosticRow("Source", adapter?.source.rawValue ?? "none")
-            diagnosticRow("Mappings", adapter.map { "\($0.mappings.count)" } ?? "0")
-            diagnosticRow("Web domain", normalizedWebDomain)
-
-            HStack(spacing: 16) {
-                StatView(label: "Intercepted",
-                         value: eventTap.eventsIntercepted)
-                StatView(label: "Remapped",
-                         value: eventTap.eventsRemapped)
-            }
-            .padding(.top, 2)
-        }
-    }
-
-    private var normalizedWebDomain: String {
-        guard let domain = appMonitor.webAppDomain else {
-            return "—"
-        }
-        return DomainNormalizer.normalizedDomain(for: domain)
-    }
-
-    private func diagnosticRow(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text("\(label):")
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
                 .foregroundColor(.secondary)
             Spacer()
             Text(value)
@@ -126,23 +195,5 @@ private struct RuntimeDiagnosticsView: View {
                 .truncationMode(.middle)
         }
         .font(.caption)
-    }
-}
-
-// MARK: - Stat view helper
-
-private struct StatView: View {
-    let label: String
-    let value: Int
-
-    var body: some View {
-        VStack {
-            Text("\(value)")
-                .font(.title3.monospacedDigit())
-                .fontWeight(.semibold)
-            Text(label)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
     }
 }

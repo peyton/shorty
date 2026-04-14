@@ -15,6 +15,18 @@ The static website lives in `web/` and uses plain HTML and CSS. It is intentiona
 - `just web-package VERSION=test`
   - Builds and packages `.build/web/` into `.build/releases/shorty-web-test.tar.gz` with a matching `.sha256` file.
 
+## Release Copy
+
+The public site points users to the latest GitHub release for the macOS app
+archive. Keep the download language aligned with the app release tooling:
+
+- app archive: `shorty-<version>-macos.zip`
+- checksum: `shorty-<version>-macos.zip.sha256`
+- verification command: `shasum -a 256 shorty-<version>-macos.zip`
+
+Support copy should keep the browser bridge clearly optional. Native app
+shortcut remapping is the primary release path.
+
 ## Public Defaults
 
 The initial site assumes:
