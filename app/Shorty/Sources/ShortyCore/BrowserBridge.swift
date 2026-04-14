@@ -8,13 +8,35 @@ import Foundation
 /// command-line target. That target forwards the same frames to this Unix
 /// domain socket so the app can update `AppMonitor.webAppDomain`.
 public final class BrowserBridge: ObservableObject {
+    public struct MessageMetadata: Equatable, Codable {
+        public let protocolVersion: Int
+        public let source: String?
+        public let tabID: Int?
+        public let windowID: Int?
+        public let title: String?
+
+        public init(
+            protocolVersion: Int = 1,
+            source: String? = nil,
+            tabID: Int? = nil,
+            windowID: Int? = nil,
+            title: String? = nil
+        ) {
+            self.protocolVersion = protocolVersion
+            self.source = source
+            self.tabID = tabID
+            self.windowID = windowID
+            self.title = title
+        }
+    }
+
     public enum NativeMessage: Equatable {
-        case domainChanged(String)
+        case domainChanged(String, MessageMetadata)
         case domainCleared
     }
 
     public static let socketName = "shorty-bridge.sock"
-    public static let maxMessageLength: UInt32 = 1_000_000
+    public static let maxMessageLength: UInt32 = 64 * 1024
 
     public static var defaultSocketPath: String {
         applicationSupportDirectory()
@@ -75,10 +97,17 @@ public final class BrowserBridge: ObservableObject {
 
         let normalized = DomainNormalizer.normalizedDomain(for: rawDomain)
         guard reportAllDomains || DomainNormalizer.supportedWebAppDomains.contains(normalized) else {
-            return nil
+            return .domainCleared
         }
 
-        return .domainChanged(normalized)
+        let metadata = MessageMetadata(
+            protocolVersion: json["protocol_version"] as? Int ?? 1,
+            source: json["source"] as? String,
+            tabID: json["tab_id"] as? Int,
+            windowID: json["window_id"] as? Int,
+            title: json["title"] as? String
+        )
+        return .domainChanged(normalized, metadata)
     }
 
     public static func readExactly(
@@ -189,6 +218,8 @@ public final class BrowserBridge: ObservableObject {
     private var isListening = false
     private var serverFD: Int32 = -1
     private var lastDomain: String?
+    private let stateLock = NSLock()
+    private let domainLock = NSLock()
 
     public var currentSocketPath: String {
         socketPath
@@ -211,7 +242,7 @@ public final class BrowserBridge: ObservableObject {
     }
 
     public func start() {
-        guard !isListening else { return }
+        guard !currentIsListening else { return }
 
         do {
             try prepareSocketDirectory()
@@ -262,7 +293,7 @@ public final class BrowserBridge: ObservableObject {
             return
         }
 
-        isListening = true
+        setListening(true)
         setStatus(.listening(socketPath))
 
         let thread = Thread { [weak self] in
@@ -275,10 +306,13 @@ public final class BrowserBridge: ObservableObject {
     }
 
     public func stop() {
-        isListening = false
-        if serverFD >= 0 {
-            close(serverFD)
-            serverFD = -1
+        setListening(false)
+        stateLock.lock()
+        let socketDescriptor = serverFD
+        serverFD = -1
+        stateLock.unlock()
+        if socketDescriptor >= 0 {
+            close(socketDescriptor)
         }
         unlink(socketPath)
         listenerThread = nil
@@ -289,7 +323,7 @@ public final class BrowserBridge: ObservableObject {
         let directory = URL(fileURLWithPath: socketPath).deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         try fileManager.setAttributes(
-            [.posixPermissions: NSNumber(value: Int16(0o700))],
+            [.posixPermissions: NSNumber(value: 0o700)],
             ofItemAtPath: directory.path
         )
     }
@@ -314,13 +348,14 @@ public final class BrowserBridge: ObservableObject {
     }
 
     private func acceptLoop() {
-        while isListening {
+        while currentIsListening {
             var clientAddr = sockaddr_un()
             var clientLen = socklen_t(MemoryLayout<sockaddr_un>.size)
+            let serverDescriptor = currentServerFD
 
             let clientFD = withUnsafeMutablePointer(to: &clientAddr) { ptr in
                 ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-                    accept(serverFD, sockPtr, &clientLen)
+                    accept(serverDescriptor, sockPtr, &clientLen)
                 }
             }
 
@@ -328,7 +363,7 @@ public final class BrowserBridge: ObservableObject {
                 if errno == EINTR {
                     continue
                 }
-                if isListening {
+                if currentIsListening {
                     ShortyLog.browserBridge.warning("accept failed: \(errno)")
                     usleep(100_000)
                 }
@@ -344,7 +379,7 @@ public final class BrowserBridge: ObservableObject {
     private func handleClient(fileDescriptor: Int32) {
         defer { close(fileDescriptor) }
 
-        while isListening {
+        while currentIsListening {
             guard let lengthData = Self.readExactly(from: fileDescriptor, count: 4) else {
                 return
             }
@@ -361,8 +396,8 @@ public final class BrowserBridge: ObservableObject {
                 reportAllDomains: configuration.reportAllBrowserDomains
             ) {
                 switch message {
-                case .domainChanged(let domain):
-                    setDomain(domain)
+                case .domainChanged(let domain, let metadata):
+                    setDomain(domain, metadata: metadata)
                 case .domainCleared:
                     clearDomain()
                 }
@@ -375,25 +410,41 @@ public final class BrowserBridge: ObservableObject {
         }
     }
 
-    private func setDomain(_ domain: String) {
+    private func setDomain(_ domain: String, metadata: MessageMetadata) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            guard self.lastDomain != domain else { return }
-            self.lastDomain = domain
+            guard self.updateLastDomainIfChanged(domain) else { return }
             self.appMonitor?.updateBrowserContext(domain: domain, source: .chromeBridge)
             self.status = .connected(domain)
+            ShortyLog.browserBridge.debug(
+                "Domain \(domain) protocol=\(metadata.protocolVersion) tab=\(metadata.tabID ?? -1) window=\(metadata.windowID ?? -1)"
+            )
         }
     }
 
     private func clearDomain() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.lastDomain = nil
+            self.setLastDomain(nil)
             self.appMonitor?.clearBrowserContext(source: .chromeBridge)
-            if self.isListening {
+            if self.currentIsListening {
                 self.status = .listening(self.socketPath)
             }
         }
+    }
+
+    private func updateLastDomainIfChanged(_ domain: String) -> Bool {
+        domainLock.lock()
+        defer { domainLock.unlock() }
+        guard lastDomain != domain else { return false }
+        lastDomain = domain
+        return true
+    }
+
+    private func setLastDomain(_ domain: String?) {
+        domainLock.lock()
+        lastDomain = domain
+        domainLock.unlock()
     }
 
     private func sendAck(to fileDescriptor: Int32) -> Bool {
@@ -411,5 +462,23 @@ public final class BrowserBridge: ObservableObject {
                 self?.status = newStatus
             }
         }
+    }
+
+    private var currentIsListening: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return isListening
+    }
+
+    private var currentServerFD: Int32 {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return serverFD
+    }
+
+    private func setListening(_ listening: Bool) {
+        stateLock.lock()
+        isListening = listening
+        stateLock.unlock()
     }
 }

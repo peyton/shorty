@@ -26,6 +26,21 @@ import ApplicationServices
 ///
 /// Yeah, it's confusing. Apple's docs are… sparse.
 public final class MenuIntrospector {
+    public struct TraversalLimits: Equatable {
+        public let maxDepth: Int
+        public let maxItems: Int
+        public let timeout: TimeInterval
+
+        public init(
+            maxDepth: Int = 8,
+            maxItems: Int = 1_000,
+            timeout: TimeInterval = 1.5
+        ) {
+            self.maxDepth = maxDepth
+            self.maxItems = maxItems
+            self.timeout = timeout
+        }
+    }
 
     /// A single discovered menu item with its keyboard shortcut.
     public struct DiscoveredMenuItem: Equatable {
@@ -37,7 +52,10 @@ public final class MenuIntrospector {
     // MARK: - Public API
 
     /// Read all menu items (with shortcuts) from the given application.
-    public func discoverMenuItems(pid: pid_t) -> [DiscoveredMenuItem] {
+    public func discoverMenuItems(
+        pid: pid_t,
+        limits: TraversalLimits = TraversalLimits()
+    ) -> [DiscoveredMenuItem] {
         let app = AXUIElementCreateApplication(pid)
         var menuBarRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
@@ -52,8 +70,57 @@ public final class MenuIntrospector {
         let menuBar = unsafeBitCast(menuBarRef, to: AXUIElement.self)
 
         var results: [DiscoveredMenuItem] = []
-        walkMenu(element: menuBar, path: [], results: &results)
+        var state = TraversalState(limits: limits)
+        walkMenu(element: menuBar, path: [], results: &results, state: &state)
         return results
+    }
+
+    @discardableResult
+    public static func invokeMenuItem(
+        pid: pid_t,
+        title: String,
+        menuPath: [String]? = nil,
+        limits: TraversalLimits = TraversalLimits()
+    ) -> Bool {
+        let introspector = MenuIntrospector()
+        return introspector.invokeMenuItem(
+            pid: pid,
+            title: title,
+            menuPath: menuPath,
+            limits: limits
+        )
+    }
+
+    @discardableResult
+    public func invokeMenuItem(
+        pid: pid_t,
+        title: String,
+        menuPath: [String]? = nil,
+        limits: TraversalLimits = TraversalLimits()
+    ) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        var menuBarRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            app,
+            kAXMenuBarAttribute as CFString,
+            &menuBarRef
+        ) == .success,
+        let menuBarRef
+        else { return false }
+
+        let menuBar = unsafeBitCast(menuBarRef, to: AXUIElement.self)
+        var state = TraversalState(limits: limits)
+        guard let item = findMenuItem(
+            in: menuBar,
+            title: title,
+            menuPath: normalizedPath(menuPath, fallbackTitle: title),
+            currentPath: [],
+            state: &state
+        ) else {
+            return false
+        }
+
+        return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
     }
 
     /// Generate an Adapter for the given app by matching discovered
@@ -82,13 +149,15 @@ public final class MenuIntrospector {
                         // Same keys — passthrough.
                         mappings.append(Adapter.Mapping(
                             canonicalID: canonical.id,
-                            method: .passthrough
+                            method: .passthrough,
+                            matchReason: match.reason.displayString
                         ))
                     } else {
                         mappings.append(Adapter.Mapping(
                             canonicalID: canonical.id,
                             method: .keyRemap,
-                            nativeKeys: nativeCombo
+                            nativeKeys: nativeCombo,
+                            matchReason: match.reason.displayString
                         ))
                     }
                 } else {
@@ -96,7 +165,9 @@ public final class MenuIntrospector {
                     mappings.append(Adapter.Mapping(
                         canonicalID: canonical.id,
                         method: .menuInvoke,
-                        menuTitle: match.item.title
+                        menuTitle: match.item.title,
+                        menuPath: match.item.menuPath,
+                        matchReason: match.reason.displayString
                     ))
                 }
             }
@@ -117,8 +188,11 @@ public final class MenuIntrospector {
     private func walkMenu(
         element: AXUIElement,
         path: [String],
-        results: inout [DiscoveredMenuItem]
+        results: inout [DiscoveredMenuItem],
+        state: inout TraversalState
     ) {
+        guard state.canVisit(depth: path.count) else { return }
+
         // Get children of this element
         var childrenRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
@@ -128,6 +202,7 @@ public final class MenuIntrospector {
         else { return }
 
         for child in children {
+            guard state.recordVisit(depth: path.count) else { return }
             let title = axString(child, kAXTitleAttribute) ?? ""
             let role = axString(child, kAXRoleAttribute) ?? ""
             let currentPath = title.isEmpty ? path : path + [title]
@@ -143,8 +218,81 @@ public final class MenuIntrospector {
             }
 
             // Recurse into submenus
-            walkMenu(element: child, path: currentPath, results: &results)
+            walkMenu(
+                element: child,
+                path: currentPath,
+                results: &results,
+                state: &state
+            )
         }
+    }
+
+    private func findMenuItem(
+        in element: AXUIElement,
+        title: String,
+        menuPath: [String],
+        currentPath: [String],
+        state: inout TraversalState
+    ) -> AXUIElement? {
+        guard state.recordVisit(depth: currentPath.count) else { return nil }
+
+        let elementTitle = axString(element, kAXTitleAttribute) ?? ""
+        let role = axString(element, kAXRoleAttribute) ?? ""
+        let nextPath = elementTitle.isEmpty ? currentPath : currentPath + [elementTitle]
+        if role == "AXMenuItem",
+           !elementTitle.isEmpty,
+           pathMatches(nextPath, requestedPath: menuPath, fallbackTitle: title) {
+            return element
+        }
+
+        var childrenRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXChildrenAttribute as CFString,
+            &childrenRef
+        ) == .success,
+        let children = childrenRef as? [AXUIElement]
+        else { return nil }
+
+        for child in children {
+            if let item = findMenuItem(
+                in: child,
+                title: title,
+                menuPath: menuPath,
+                currentPath: nextPath,
+                state: &state
+            ) {
+                return item
+            }
+        }
+        return nil
+    }
+
+    private func normalizedPath(
+        _ menuPath: [String]?,
+        fallbackTitle: String
+    ) -> [String] {
+        let path = (menuPath ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return path.isEmpty ? [fallbackTitle] : path
+    }
+
+    private func pathMatches(
+        _ actualPath: [String],
+        requestedPath: [String],
+        fallbackTitle: String
+    ) -> Bool {
+        guard !requestedPath.isEmpty else {
+            return actualPath.last == fallbackTitle
+        }
+        if actualPath == requestedPath {
+            return true
+        }
+        guard actualPath.count >= requestedPath.count else {
+            return false
+        }
+        return Array(actualPath.suffix(requestedPath.count)) == requestedPath
     }
 
     // MARK: - Key combo extraction from AX attributes
@@ -198,5 +346,29 @@ public final class MenuIntrospector {
             return num.intValue
         }
         return nil
+    }
+}
+
+private struct TraversalState {
+    let limits: MenuIntrospector.TraversalLimits
+    let startedAt = Date()
+    let deadline: Date
+    var visited = 0
+
+    init(limits: MenuIntrospector.TraversalLimits) {
+        self.limits = limits
+        self.deadline = startedAt.addingTimeInterval(limits.timeout)
+    }
+
+    mutating func canVisit(depth: Int) -> Bool {
+        guard depth <= limits.maxDepth else { return false }
+        guard visited < limits.maxItems else { return false }
+        return Date() <= deadline
+    }
+
+    mutating func recordVisit(depth: Int) -> Bool {
+        guard canVisit(depth: depth) else { return false }
+        visited += 1
+        return true
     }
 }

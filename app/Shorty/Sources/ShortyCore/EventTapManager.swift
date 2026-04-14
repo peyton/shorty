@@ -1,6 +1,120 @@
 import AppKit
 import Combine
 import CoreGraphics
+import OSLog
+
+public struct EventTapCounters: Codable, Equatable {
+    public private(set) var keyDownEventsSeen: Int
+    public private(set) var shortcutsMatched: Int
+    public private(set) var eventsRemapped: Int
+    public private(set) var eventsPassedThrough: Int
+    public private(set) var menuActionsInvoked: Int
+    public private(set) var menuActionsSucceeded: Int
+    public private(set) var menuActionsFailed: Int
+    public private(set) var accessibilityActionsInvoked: Int
+    public private(set) var accessibilityActionsSucceeded: Int
+    public private(set) var accessibilityActionsFailed: Int
+    public private(set) var contextGuardsApplied: Int
+
+    public init(
+        keyDownEventsSeen: Int = 0,
+        shortcutsMatched: Int = 0,
+        eventsRemapped: Int = 0,
+        eventsPassedThrough: Int = 0,
+        menuActionsInvoked: Int = 0,
+        menuActionsSucceeded: Int = 0,
+        menuActionsFailed: Int = 0,
+        accessibilityActionsInvoked: Int = 0,
+        accessibilityActionsSucceeded: Int = 0,
+        accessibilityActionsFailed: Int = 0,
+        contextGuardsApplied: Int = 0
+    ) {
+        self.keyDownEventsSeen = keyDownEventsSeen
+        self.shortcutsMatched = shortcutsMatched
+        self.eventsRemapped = eventsRemapped
+        self.eventsPassedThrough = eventsPassedThrough
+        self.menuActionsInvoked = menuActionsInvoked
+        self.menuActionsSucceeded = menuActionsSucceeded
+        self.menuActionsFailed = menuActionsFailed
+        self.accessibilityActionsInvoked = accessibilityActionsInvoked
+        self.accessibilityActionsSucceeded = accessibilityActionsSucceeded
+        self.accessibilityActionsFailed = accessibilityActionsFailed
+        self.contextGuardsApplied = contextGuardsApplied
+    }
+
+    public var isEmpty: Bool {
+        keyDownEventsSeen == 0
+            && shortcutsMatched == 0
+            && eventsRemapped == 0
+            && eventsPassedThrough == 0
+            && menuActionsInvoked == 0
+            && menuActionsSucceeded == 0
+            && menuActionsFailed == 0
+            && accessibilityActionsInvoked == 0
+            && accessibilityActionsSucceeded == 0
+            && accessibilityActionsFailed == 0
+            && contextGuardsApplied == 0
+    }
+
+    public mutating func recordKeyDownEvent() {
+        keyDownEventsSeen += 1
+    }
+
+    public mutating func recordResolvedAction(_ action: AdapterRegistry.ResolvedAction) {
+        shortcutsMatched += 1
+        switch action {
+        case .remap:
+            eventsRemapped += 1
+        case .passthrough:
+            eventsPassedThrough += 1
+        case .invokeMenu:
+            menuActionsInvoked += 1
+        case .performAXAction:
+            accessibilityActionsInvoked += 1
+        }
+    }
+
+    public mutating func recordContextGuard() {
+        contextGuardsApplied += 1
+        eventsPassedThrough += 1
+    }
+
+    public mutating func recordAsyncActionResult(
+        kind: AvailableShortcutActionKind,
+        succeeded: Bool
+    ) {
+        switch kind {
+        case .menuInvoke:
+            if succeeded {
+                menuActionsSucceeded += 1
+            } else {
+                menuActionsFailed += 1
+            }
+        case .axAction:
+            if succeeded {
+                accessibilityActionsSucceeded += 1
+            } else {
+                accessibilityActionsFailed += 1
+            }
+        case .passthrough, .keyRemap:
+            break
+        }
+    }
+
+    public mutating func merge(_ other: EventTapCounters) {
+        keyDownEventsSeen += other.keyDownEventsSeen
+        shortcutsMatched += other.shortcutsMatched
+        eventsRemapped += other.eventsRemapped
+        eventsPassedThrough += other.eventsPassedThrough
+        menuActionsInvoked += other.menuActionsInvoked
+        menuActionsSucceeded += other.menuActionsSucceeded
+        menuActionsFailed += other.menuActionsFailed
+        accessibilityActionsInvoked += other.accessibilityActionsInvoked
+        accessibilityActionsSucceeded += other.accessibilityActionsSucceeded
+        accessibilityActionsFailed += other.accessibilityActionsFailed
+        contextGuardsApplied += other.contextGuardsApplied
+    }
+}
 
 /// Installs a CGEventTap to intercept keyboard events and remap them
 /// according to the active adapter for the frontmost application.
@@ -28,24 +142,48 @@ import CoreGraphics
 /// it inside the callback with `Unmanaged.fromOpaque`.
 public final class EventTapManager: ObservableObject {
     public static let enabledDefaultsKey = "Shorty.EventTap.Enabled"
+    private static let signposter = OSSignposter(
+        subsystem: Bundle.main.bundleIdentifier ?? "app.peyton.shorty",
+        category: "EventTap"
+    )
 
     // MARK: - Published state
 
     /// Whether the event tap is currently active and receiving events.
     @Published public private(set) var isActive: Bool = false
 
-    /// Cumulative count of events intercepted (useful for the UI).
-    @Published public private(set) var eventsIntercepted: Int = 0
+    /// Cumulative event-tap counters useful for diagnostics and support.
+    @Published public private(set) var counters = EventTapCounters()
+
+    /// Cumulative count of enabled keyDown events seen by the tap.
+    public var eventsIntercepted: Int {
+        counters.keyDownEventsSeen
+    }
 
     /// Cumulative count of events that were actually remapped.
-    @Published public private(set) var eventsRemapped: Int = 0
+    public var eventsRemapped: Int {
+        counters.eventsRemapped
+    }
+
+    /// Cumulative count of keyDown events that matched a Shorty shortcut.
+    public var shortcutsMatched: Int {
+        counters.shortcutsMatched
+    }
+
+    public func flushPendingDiagnostics() {
+        flushDiagnostics()
+    }
 
     /// Last lifecycle note, such as macOS temporarily disabling the tap.
     @Published public private(set) var lifecycleMessage: String?
 
+    /// Last resolved shortcut action, including async menu/AX success when known.
+    @Published public private(set) var lastAction: LastShortcutActionDiagnostic?
+
     /// Whether the tap is enabled (user toggle).
     @Published public var isEnabled: Bool {
         didSet {
+            setEnabledSnapshot(isEnabled)
             userDefaults.set(isEnabled, forKey: Self.enabledDefaultsKey)
             if isEnabled {
                 enableTap()
@@ -82,8 +220,10 @@ public final class EventTapManager: ObservableObject {
     private let diagnosticsLock = NSLock()
     private let diagnosticsQueue = DispatchQueue(label: "com.shorty.eventtap.diagnostics")
     private var diagnosticsTimer: DispatchSourceTimer?
-    private var pendingEventsIntercepted: Int = 0
-    private var pendingEventsRemapped: Int = 0
+    private var pendingCounters = EventTapCounters()
+    private let actionQueue = DispatchQueue(label: "com.shorty.eventtap.actions", qos: .userInitiated)
+    private let enabledLock = NSLock()
+    private var enabledSnapshot = true
 
     // MARK: - Init / Deinit
 
@@ -100,6 +240,7 @@ public final class EventTapManager: ObservableObject {
         } else {
             self.isEnabled = userDefaults.bool(forKey: Self.enabledDefaultsKey)
         }
+        setEnabledSnapshot(isEnabled)
     }
 
     deinit {
@@ -166,14 +307,14 @@ public final class EventTapManager: ObservableObject {
         tapThread = thread
         thread.start()
 
-        if !isEnabled {
+        if !currentIsEnabled {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
         startDiagnosticsFlush()
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.isActive = self.isEnabled
+            self.isActive = self.currentIsEnabled
         }
 
         return true
@@ -184,6 +325,7 @@ public final class EventTapManager: ObservableObject {
         stopDiagnosticsFlush()
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
         }
 
         if let runLoop = tapRunLoop, let source = runLoopSource {
@@ -232,18 +374,7 @@ public final class EventTapManager: ObservableObject {
         // If the tap was disabled by the OS (e.g., system went to
         // screensaver and back), re-enable it.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let tap = eventTap {
-                CGEvent.tapEnable(tap: tap, enable: true)
-            }
-            let message = type == .tapDisabledByTimeout
-                ? "Keyboard tap restarted after macOS paused it."
-                : "Keyboard tap restarted after user input disabled it."
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.lifecycleMessage = message
-                self.isActive = self.isEnabled
-            }
-            ShortyLog.eventTap.warning("\(message)")
+            handleTapDisabled(type)
             return event
         }
 
@@ -252,21 +383,39 @@ public final class EventTapManager: ObservableObject {
         guard type == .keyDown else { return event }
 
         // Don't intercept if user toggled off.
-        guard isEnabled else { return event }
+        guard currentIsEnabled else { return event }
 
+        recordKeyDownEvent()
         let combo = KeyCombo(event: event)
+        let appSnapshot = appMonitor.snapshot()
 
         // Look up the canonical shortcut this combo corresponds to.
-        guard let appID = appMonitor.effectiveAppID,
-              let resolved = registry.resolve(combo: combo, forApp: appID)
+        let signpostID = Self.signposter.makeSignpostID()
+        let signpost = Self.signposter.beginInterval("ResolveShortcut", id: signpostID)
+        defer {
+            Self.signposter.endInterval("ResolveShortcut", signpost)
+        }
+        guard let appID = appSnapshot.effectiveAppID,
+              let resolved = registry.resolveShortcut(combo: combo, forApp: appID)
         else {
             // No mapping — pass through unchanged.
             return event
         }
 
-        switch resolved {
+        guard shouldExecute(resolved) else {
+            recordContextGuard(resolved, appSnapshot: appSnapshot)
+            return event
+        }
+
+        switch resolved.action {
         case .remap(let nativeCombo):
-            recordEvent(remapped: true)
+            recordResolvedAction(resolved.action)
+            recordLastAction(
+                resolved,
+                appSnapshot: appSnapshot,
+                succeeded: true,
+                detail: "Remapped to \(nativeCombo.displayString)."
+            )
             // Mutate the event in place — change keycode and modifier flags.
             event.setIntegerValueField(.keyboardEventKeycode,
                                        value: Int64(nativeCombo.keyCode))
@@ -274,38 +423,217 @@ public final class EventTapManager: ObservableObject {
             return event
 
         case .invokeMenu(let menuTitle):
-            recordEvent(remapped: false)
+            recordResolvedAction(resolved.action)
+            recordLastAction(
+                resolved,
+                appSnapshot: appSnapshot,
+                succeeded: nil,
+                detail: "Queued menu action \(menuTitle)."
+            )
             // Swallow the event and trigger the menu item via AX.
-            let pid = appMonitor.currentPID
-            DispatchQueue.global(qos: .userInitiated).async {
-                Self.invokeMenuItem(title: menuTitle, pid: pid)
+            let pid = appSnapshot.currentPID
+            let menuPath = resolved.mapping.menuPath
+            actionQueue.async { [weak self] in
+                let succeeded = MenuIntrospector.invokeMenuItem(
+                    pid: pid,
+                    title: menuTitle,
+                    menuPath: menuPath
+                )
+                self?.recordAsyncActionResult(
+                    resolved,
+                    appSnapshot: appSnapshot,
+                    succeeded: succeeded,
+                    detail: succeeded
+                        ? "Invoked menu item \(menuTitle)."
+                        : "Could not invoke menu item \(menuTitle)."
+                )
             }
             return nil // swallow
 
         case .performAXAction(let action):
-            recordEvent(remapped: false)
+            recordResolvedAction(resolved.action)
+            recordLastAction(
+                resolved,
+                appSnapshot: appSnapshot,
+                succeeded: nil,
+                detail: "Queued Accessibility action \(action)."
+            )
             // Phase 2+ — placeholder for arbitrary AX actions.
-            let pid = appMonitor.currentPID
-            DispatchQueue.global(qos: .userInitiated).async {
-                Self.performAXAction(action, pid: pid)
+            let pid = appSnapshot.currentPID
+            actionQueue.async { [weak self] in
+                let succeeded = Self.performAXAction(action, pid: pid)
+                self?.recordAsyncActionResult(
+                    resolved,
+                    appSnapshot: appSnapshot,
+                    succeeded: succeeded,
+                    detail: succeeded
+                        ? "Performed Accessibility action \(action)."
+                        : "Could not perform Accessibility action \(action)."
+                )
             }
             return nil
 
         case .passthrough:
-            recordEvent(remapped: false)
+            recordResolvedAction(resolved.action)
+            recordLastAction(
+                resolved,
+                appSnapshot: appSnapshot,
+                succeeded: true,
+                detail: "Allowed the native shortcut through unchanged."
+            )
             return event
         }
     }
 
+    private func handleTapDisabled(_ type: CGEventType) {
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: true)
+        }
+        let message = type == .tapDisabledByTimeout
+            ? "Keyboard tap restarted after macOS paused it."
+            : "Keyboard tap restarted after user input disabled it."
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lifecycleMessage = message
+            self.isActive = self.currentIsEnabled
+        }
+        ShortyLog.eventTap.warning("\(message)")
+    }
+
+    private var currentIsEnabled: Bool {
+        enabledLock.lock()
+        defer { enabledLock.unlock() }
+        return enabledSnapshot
+    }
+
+    private func setEnabledSnapshot(_ isEnabled: Bool) {
+        enabledLock.lock()
+        enabledSnapshot = isEnabled
+        enabledLock.unlock()
+    }
+
+    private func shouldExecute(
+        _ resolution: AdapterRegistry.ResolvedShortcutAction
+    ) -> Bool {
+        guard !requiresConservativeContextGuard(resolution) else {
+            return resolution.mapping.context != nil
+        }
+        return true
+    }
+
+    private func requiresConservativeContextGuard(
+        _ resolution: AdapterRegistry.ResolvedShortcutAction
+    ) -> Bool {
+        let dangerousIDs: Set<String> = [
+            "submit_field",
+            "newline_in_field",
+            "toggle_play_pause",
+            "close_tab",
+            "close_window"
+        ]
+        guard dangerousIDs.contains(resolution.canonicalID) else { return false }
+        guard resolution.action != .passthrough else { return false }
+        return true
+    }
+
     // MARK: - Diagnostics
 
-    private func recordEvent(remapped: Bool) {
+    private func recordKeyDownEvent() {
         diagnosticsLock.lock()
-        pendingEventsIntercepted += 1
-        if remapped {
-            pendingEventsRemapped += 1
-        }
+        pendingCounters.recordKeyDownEvent()
         diagnosticsLock.unlock()
+    }
+
+    private func recordResolvedAction(_ action: AdapterRegistry.ResolvedAction) {
+        diagnosticsLock.lock()
+        pendingCounters.recordResolvedAction(action)
+        diagnosticsLock.unlock()
+    }
+
+    private func recordContextGuard(
+        _ resolution: AdapterRegistry.ResolvedShortcutAction,
+        appSnapshot: AppMonitor.Snapshot
+    ) {
+        diagnosticsLock.lock()
+        pendingCounters.recordContextGuard()
+        diagnosticsLock.unlock()
+        recordLastAction(
+            resolution,
+            appSnapshot: appSnapshot,
+            succeeded: true,
+            detail: "Passed through because this shortcut needs explicit context approval."
+        )
+    }
+
+    private func recordAsyncActionResult(
+        _ resolution: AdapterRegistry.ResolvedShortcutAction,
+        appSnapshot: AppMonitor.Snapshot,
+        succeeded: Bool,
+        detail: String
+    ) {
+        diagnosticsLock.lock()
+        pendingCounters.recordAsyncActionResult(
+            kind: actionKind(for: resolution.mapping),
+            succeeded: succeeded
+        )
+        diagnosticsLock.unlock()
+        recordLastAction(
+            resolution,
+            appSnapshot: appSnapshot,
+            succeeded: succeeded,
+            detail: detail
+        )
+    }
+
+    private func recordLastAction(
+        _ resolution: AdapterRegistry.ResolvedShortcutAction,
+        appSnapshot: AppMonitor.Snapshot,
+        succeeded: Bool?,
+        detail: String
+    ) {
+        let diagnostic = LastShortcutActionDiagnostic(
+            appIdentifier: appSnapshot.effectiveAppID,
+            appName: appSnapshot.currentAppName,
+            canonicalID: resolution.canonicalID,
+            actionKind: actionKind(for: resolution.mapping),
+            actionDescription: actionDescription(for: resolution),
+            succeeded: succeeded,
+            detail: detail
+        )
+        DispatchQueue.main.async { [weak self] in
+            self?.lastAction = diagnostic
+        }
+    }
+
+    private func actionKind(for mapping: Adapter.Mapping) -> AvailableShortcutActionKind {
+        switch mapping.method {
+        case .keyRemap:
+            return .keyRemap
+        case .menuInvoke:
+            return .menuInvoke
+        case .axAction:
+            return .axAction
+        case .passthrough:
+            return .passthrough
+        }
+    }
+
+    private func actionDescription(
+        for resolution: AdapterRegistry.ResolvedShortcutAction
+    ) -> String {
+        switch resolution.action {
+        case .remap(let combo):
+            return "Sends \(combo.displayString)"
+        case .invokeMenu(let title):
+            if let path = resolution.mapping.menuPath, !path.isEmpty {
+                return "Chooses \(path.joined(separator: " > "))"
+            }
+            return "Chooses \(title)"
+        case .performAXAction(let action):
+            return "Performs \(action)"
+        case .passthrough:
+            return "Uses the app's native shortcut"
+        }
     }
 
     private func startDiagnosticsFlush() {
@@ -327,78 +655,27 @@ public final class EventTapManager: ObservableObject {
 
     private func flushDiagnostics() {
         diagnosticsLock.lock()
-        let intercepted = pendingEventsIntercepted
-        let remapped = pendingEventsRemapped
-        pendingEventsIntercepted = 0
-        pendingEventsRemapped = 0
+        let pending = pendingCounters
+        pendingCounters = EventTapCounters()
         diagnosticsLock.unlock()
 
-        guard intercepted > 0 || remapped > 0 else { return }
+        guard !pending.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
-            self?.eventsIntercepted += intercepted
-            self?.eventsRemapped += remapped
+            self?.counters.merge(pending)
         }
     }
 
     // MARK: - AX helpers (Phase 2 — basic implementations)
 
-    /// Walk the app's menu bar to find and press a menu item by title.
-    private static func invokeMenuItem(title: String, pid: pid_t) {
-        let app = AXUIElementCreateApplication(pid)
-        var menuBarRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXMenuBarAttribute as CFString, &menuBarRef) == .success,
-              let menuBarRef
-        else { return }
-        let menuBar = unsafeBitCast(menuBarRef, to: AXUIElement.self)
-
-        // Walk top-level menus → items
-        var childrenRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(menuBar,
-                                            kAXChildrenAttribute as CFString,
-                                            &childrenRef) == .success,
-              let menus = childrenRef as? [AXUIElement]
-        else { return }
-
-        for menu in menus {
-            if let item = findMenuItem(in: menu, title: title) {
-                AXUIElementPerformAction(item, kAXPressAction as CFString)
-                return
-            }
-        }
-    }
-
-    /// Recursively search for a menu item matching the given title.
-    private static func findMenuItem(in element: AXUIElement, title: String) -> AXUIElement? {
-        // Check this element's title
-        var titleRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef) == .success,
-           let elementTitle = titleRef as? String, elementTitle == title {
-            return element
-        }
-
-        // Recurse into children
-        var childrenRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
-              let children = childrenRef as? [AXUIElement]
-        else { return nil }
-
-        for child in children {
-            if let found = findMenuItem(in: child, title: title) {
-                return found
-            }
-        }
-        return nil
-    }
-
     /// Perform a named AX action on the focused element of the target app.
-    private static func performAXAction(_ action: String, pid: pid_t) {
+    private static func performAXAction(_ action: String, pid: pid_t) -> Bool {
         let app = AXUIElementCreateApplication(pid)
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
               let focusedRef
-        else { return }
+        else { return false }
         let focused = unsafeBitCast(focusedRef, to: AXUIElement.self)
-        AXUIElementPerformAction(focused, action as CFString)
+        return AXUIElementPerformAction(focused, action as CFString) == .success
     }
 }
 

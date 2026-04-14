@@ -36,6 +36,34 @@ final class ReleaseModelsTests: XCTestCase {
         XCTAssertTrue(conflicts.contains { $0.shortcutIDs == ["newline_in_field"] })
     }
 
+    func testShortcutProfilePersistsCustomizationState() throws {
+        var profile = UserShortcutProfile.releaseDefault
+        profile.setShortcut("focus_url_bar", enabled: false)
+        profile.setAdapter("com.example.App", enabled: false)
+        profile.setMapping(
+            adapterID: "com.example.App",
+            canonicalID: "new_window",
+            enabled: false
+        )
+        profile.updateShortcut(
+            "spotlight_search",
+            keyCombo: try XCTUnwrap(KeyCombo(from: "cmd+shift+k"))
+        )
+
+        let decoded = try UserShortcutProfile.decode(from: profile.encodedJSON())
+
+        XCTAssertFalse(decoded.isShortcutEnabled("focus_url_bar"))
+        XCTAssertFalse(decoded.isAdapterEnabled("com.example.App"))
+        XCTAssertFalse(decoded.isMappingEnabled(
+            adapterID: "com.example.App",
+            canonicalID: "new_window"
+        ))
+        XCTAssertEqual(
+            decoded.shortcuts.first { $0.id == "spotlight_search" }?.defaultKeys,
+            KeyCombo(from: "cmd+shift+k")
+        )
+    }
+
     func testSupportBundleEncodesStableJSON() throws {
         let diagnostics = RuntimeDiagnosticSnapshot(
             engineStatus: "Shorty is active",
@@ -54,7 +82,11 @@ final class ReleaseModelsTests: XCTestCase {
                 detail: "Safari reported figma.com."
             ),
             eventsIntercepted: 4,
+            eventsMatched: 3,
             eventsRemapped: 2,
+            eventsPassedThrough: 1,
+            menuActionsInvoked: 0,
+            accessibilityActionsInvoked: 0,
             adapterValidationMessages: []
         )
         let bundle = SupportBundle(
@@ -83,6 +115,7 @@ final class ReleaseModelsTests: XCTestCase {
         XCTAssertTrue(json.contains(#""adapterCount" : 1"#))
         XCTAssertTrue(json.contains(#""appVersion" : "1.0.0 (1)""#))
         XCTAssertTrue(json.contains(#""browserContextSource" : "safariExtension""#))
+        XCTAssertTrue(json.contains(#""eventsMatched" : 3"#))
         XCTAssertTrue(json.contains(#""supportedWebDomains" : ["#))
         XCTAssertTrue(json.contains(#""web:figma.com""#))
     }
@@ -123,6 +156,136 @@ final class ReleaseModelsTests: XCTestCase {
         XCTAssertEqual(enabled.title, "Launch at Login enabled")
         XCTAssertFalse(needsApproval.isEnabled)
         XCTAssertEqual(needsApproval.title, "Launch at Login needs approval")
+    }
+
+    func testEventTapCountersSeparateObservedMatchedAndActionCounts() {
+        var counters = EventTapCounters()
+
+        counters.recordKeyDownEvent()
+        counters.recordKeyDownEvent()
+        counters.recordResolvedAction(.remap(KeyCombo(from: "cmd+k")!))
+        counters.recordResolvedAction(.invokeMenu("New Window"))
+        counters.recordAsyncActionResult(kind: .menuInvoke, succeeded: false)
+        counters.recordContextGuard()
+
+        XCTAssertEqual(counters.keyDownEventsSeen, 2)
+        XCTAssertEqual(counters.shortcutsMatched, 2)
+        XCTAssertEqual(counters.eventsRemapped, 1)
+        XCTAssertEqual(counters.menuActionsInvoked, 1)
+        XCTAssertEqual(counters.menuActionsFailed, 1)
+        XCTAssertEqual(counters.eventsPassedThrough, 1)
+        XCTAssertEqual(counters.contextGuardsApplied, 1)
+    }
+
+    func testAppMonitorExpiresStaleBrowserContext() {
+        let monitor = AppMonitor()
+        monitor.updateActiveApplication(
+            bundleIdentifier: "com.google.Chrome",
+            localizedName: "Google Chrome",
+            processIdentifier: 401
+        )
+        monitor.updateBrowserContext(domain: "workspace.slack.com", source: .chromeBridge)
+
+        XCTAssertEqual(monitor.snapshot().effectiveAppID, "web:slack.com")
+        XCTAssertTrue(monitor.expireStaleBrowserContext(
+            now: Date().addingTimeInterval(AppMonitor.browserContextExpirationInterval + 1)
+        ))
+        XCTAssertNil(monitor.webAppDomain)
+        XCTAssertEqual(monitor.effectiveAppID, "com.google.Chrome")
+    }
+
+    func testAdapterMappingDecodesLegacyPayloadWithDefaults() throws {
+        let payload = Data(
+            #"{"canonicalID":"new_window","method":"menuInvoke","menuTitle":"New Window"}"#.utf8
+        )
+
+        let mapping = try JSONDecoder().decode(Adapter.Mapping.self, from: payload)
+
+        XCTAssertTrue(mapping.isEnabled)
+        XCTAssertNil(mapping.menuPath)
+        XCTAssertNil(mapping.matchReason)
+    }
+
+    func testBridgeInstallManagerReportsInstalledManifest() throws {
+        let home = temporaryDirectory()
+        let manager = BrowserBridgeInstallManager(homeDirectory: home)
+        let manifestDirectory = home
+            .appendingPathComponent("Library/Application Support/Google/Chrome/NativeMessagingHosts")
+        try FileManager.default.createDirectory(
+            at: manifestDirectory,
+            withIntermediateDirectories: true
+        )
+        let helper = home.appendingPathComponent("shorty-bridge")
+        try "#!/bin/sh\nexit 0\n".write(to: helper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o755))],
+            ofItemAtPath: helper.path
+        )
+        let manifest = manifestDirectory
+            .appendingPathComponent("\(BrowserBridgeInstallManager.nativeHostName).json")
+        let payload: [String: Any] = [
+            "name": BrowserBridgeInstallManager.nativeHostName,
+            "description": "Shorty browser context bridge",
+            "path": helper.path,
+            "type": "stdio",
+            "allowed_origins": ["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        try data.write(to: manifest)
+
+        let status = manager.status(for: .chrome)
+
+        XCTAssertEqual(status.state, .installed)
+        XCTAssertEqual(status.manifestPath, manifest.path)
+        XCTAssertEqual(status.helperPath, helper.path)
+    }
+
+    func testBridgeInstallManagerFlagsMissingHelper() throws {
+        let home = temporaryDirectory()
+        let manager = BrowserBridgeInstallManager(homeDirectory: home)
+        let manifestDirectory = home
+            .appendingPathComponent("Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts")
+        try FileManager.default.createDirectory(
+            at: manifestDirectory,
+            withIntermediateDirectories: true
+        )
+        let manifest = manifestDirectory
+            .appendingPathComponent("\(BrowserBridgeInstallManager.nativeHostName).json")
+        let payload: [String: Any] = [
+            "name": BrowserBridgeInstallManager.nativeHostName,
+            "path": home.appendingPathComponent("missing-helper").path
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        try data.write(to: manifest)
+
+        let status = manager.status(for: .brave)
+
+        XCTAssertEqual(status.state, .needsAttention)
+        XCTAssertTrue(status.detail.contains("missing or not executable"))
+    }
+
+    func testGeneratedAdapterReviewExplainsConfidenceAndWarnings() throws {
+        let adapter = Adapter(
+            appIdentifier: "com.example.Generated",
+            appName: "Generated",
+            source: .menuIntrospection,
+            mappings: [
+                .init(canonicalID: "submit_field", method: .menuInvoke, menuTitle: "Send"),
+                .init(
+                    canonicalID: "command_palette",
+                    method: .keyRemap,
+                    nativeKeys: try XCTUnwrap(KeyCombo(from: "cmd+k"))
+                )
+            ]
+        )
+
+        let review = ShortcutEngine.reviewGeneratedAdapter(adapter)
+
+        XCTAssertEqual(review.adapterIdentifier, adapter.appIdentifier)
+        XCTAssertFalse(review.reasons.isEmpty)
+        XCTAssertTrue(review.warnings.contains { $0.contains("text-entry") })
+        XCTAssertGreaterThan(review.confidence, 0)
+        XCTAssertLessThanOrEqual(review.confidence, 0.98)
     }
 
     func testShortcutEngineDiagnosticSnapshotIncludesBrowserSource() {
@@ -170,8 +333,62 @@ final class ReleaseModelsTests: XCTestCase {
         XCTAssertEqual(bundle.summary.adapterCount, bundle.adapters.count)
         XCTAssertGreaterThan(bundle.summary.adapterCountsBySource["builtin"] ?? 0, 0)
         XCTAssertTrue(bundle.summary.supportedWebDomains.contains("docs.google.com"))
+        XCTAssertFalse(bundle.summary.bridgeInstallStatuses.isEmpty)
         XCTAssertEqual(bundle.summary.activeAvailability.state, .available)
         XCTAssertEqual(bundle.summary.activeAvailability.adapterIdentifier, "web:docs.google.com")
+    }
+
+    func testShortcutEngineLoadsPersistedAdapterRevisions() throws {
+        let suiteName = "ShortyTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let adapter = Adapter(
+            appIdentifier: "com.example.persisted-adapter",
+            appName: "Persisted Adapter",
+            source: .user,
+            mappings: [.init(canonicalID: "new_window", method: .passthrough)]
+        )
+        let revision = AdapterRevision(
+            adapterIdentifier: adapter.appIdentifier,
+            summary: "Imported user adapter.",
+            adapter: adapter
+        )
+        defaults.set(
+            try JSONEncoder().encode([revision]),
+            forKey: ShortcutEngine.adapterRevisionsDefaultsKey
+        )
+
+        let engine = ShortcutEngine(
+            userDefaults: defaults,
+            safariExtensionUserDefaults: defaults
+        )
+
+        XCTAssertEqual(engine.adapterRevisions.count, 1)
+        XCTAssertEqual(engine.adapterRevisions.first?.adapterIdentifier, adapter.appIdentifier)
+    }
+
+    func testGeneratedAdapterReviewFlagsLowCoverageAndRiskyMappings() throws {
+        let adapter = Adapter(
+            appIdentifier: "com.shorty.generated.fixture",
+            appName: "Generated Fixture",
+            source: .menuIntrospection,
+            mappings: [
+                .init(canonicalID: "submit_field", method: .passthrough),
+                .init(
+                    canonicalID: "new_window",
+                    method: .menuInvoke,
+                    menuTitle: "New Window"
+                )
+            ]
+        )
+
+        let review = ShortcutEngine.reviewGeneratedAdapter(adapter)
+
+        XCTAssertEqual(review.adapterIdentifier, adapter.appIdentifier)
+        XCTAssertLessThan(review.confidence, 0.75)
+        XCTAssertTrue(review.warnings.contains { $0.contains("Low coverage") })
+        XCTAssertTrue(review.warnings.contains { $0.contains("text-entry") })
+        XCTAssertTrue(review.warnings.contains { $0.contains("Menu-invoked") })
     }
 
     func testSafariExtensionBridgeMessageRefreshClearsDomain() throws {
@@ -207,4 +424,9 @@ final class ReleaseModelsTests: XCTestCase {
         XCTAssertEqual(engine.safariExtensionStatus.state, .enabled)
     }
 
+}
+
+private func temporaryDirectory() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("ShortyReleaseModelTests-\(UUID().uuidString)", isDirectory: true)
 }

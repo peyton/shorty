@@ -29,6 +29,17 @@ public struct IntentMatcher {
         case exactAlias
         case exactKeyCombo
         case keywordOverlap
+
+        public var displayString: String {
+            switch self {
+            case .exactAlias:
+                return "Matched a known menu alias."
+            case .exactKeyCombo:
+                return "Matched the native key combo and supporting menu text."
+            case .keywordOverlap:
+                return "Matched shortcut words against the menu title."
+            }
+        }
     }
 
     private struct Candidate {
@@ -70,7 +81,11 @@ public struct IntentMatcher {
     ) -> Candidate {
         let aliasScore = aliasScore(canonical: canonical, item: item)
         let keywordScore = keywordScore(canonical: canonical, item: item)
-        let keyComboScore = keyComboScore(canonical: canonical, item: item)
+        let keyComboScore = keyComboScore(
+            canonical: canonical,
+            item: item,
+            hasSemanticMatch: aliasScore > 0 || keywordScore >= 0.35
+        )
 
         let score = min(aliasScore + keywordScore + keyComboScore, 1.0)
         let reason: Reason
@@ -89,6 +104,11 @@ public struct IntentMatcher {
         canonical: CanonicalShortcut,
         item: MenuIntrospector.DiscoveredMenuItem
     ) -> Double {
+        guard !Self.denylistedMenuTitles[canonical.id, default: []]
+            .contains(item.title.lowercased())
+        else {
+            return -1
+        }
         if let aliases = Self.aliasTable[canonical.id] {
             let itemLower = item.title.lowercased()
             for alias in aliases where itemLower.contains(alias.lowercased()) {
@@ -112,10 +132,11 @@ public struct IntentMatcher {
 
     private func keyComboScore(
         canonical: CanonicalShortcut,
-        item: MenuIntrospector.DiscoveredMenuItem
+        item: MenuIntrospector.DiscoveredMenuItem,
+        hasSemanticMatch: Bool
     ) -> Double {
         if let itemCombo = item.keyCombo, itemCombo == canonical.defaultKeys {
-            return 0.75
+            return hasSemanticMatch ? 0.75 : 0
         }
         return 0
     }
@@ -164,7 +185,7 @@ public struct IntentMatcher {
             "new window"
         ],
         "close_window": [
-            "close window", "close all"
+            "close window"
         ],
         "minimize_window": [
             "minimize"
@@ -194,5 +215,9 @@ public struct IntentMatcher {
         "submit_field": [
             // Usually not a menu item — handled by keyRemap
         ]
+    ]
+
+    private static let denylistedMenuTitles: [String: Set<String>] = [
+        "close_window": ["close all", "close all windows", "close others"]
     ]
 }

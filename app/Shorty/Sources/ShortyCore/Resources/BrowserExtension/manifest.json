@@ -10,7 +10,31 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "*://calendar.google.com/*",
+        "*://chatgpt.com/*",
+        "*://*.chatgpt.com/*",
+        "*://claude.ai/*",
+        "*://*.claude.ai/*",
+        "*://docs.google.com/*",
+        "*://drive.google.com/*",
+        "*://figma.com/*",
+        "*://*.figma.com/*",
+        "*://github.com/*",
+        "*://*.github.com/*",
+        "*://linear.app/*",
+        "*://*.linear.app/*",
+        "*://mail.google.com/*",
+        "*://meet.google.com/*",
+        "*://notion.so/*",
+        "*://*.notion.so/*",
+        "*://sheets.google.com/*",
+        "*://slack.com/*",
+        "*://*.slack.com/*",
+        "*://slides.google.com/*",
+        "*://whatsapp.com/*",
+        "*://*.whatsapp.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

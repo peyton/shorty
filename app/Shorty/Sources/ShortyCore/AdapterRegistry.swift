@@ -11,6 +11,7 @@ import Foundation
 /// unmodified — Shorty is strictly opt-in per app.
 public final class AdapterRegistry: ObservableObject {
     public static let maxAdapterFileSize = 256 * 1024
+    public static let maxAdapterFilesPerDirectory = 500
 
     /// All loaded adapters, keyed by app identifier.
     @Published public private(set) var adapters: [String: Adapter] = [:]
@@ -32,6 +33,11 @@ public final class AdapterRegistry: ObservableObject {
 
     /// Fast path used from the event tap: app ID -> canonical ID -> action.
     private var actionIndex: [String: [String: ResolvedAction]] = [:]
+    private var mappingIndex: [String: [String: Adapter.Mapping]] = [:]
+    private var sourceIndex: [String: Adapter.Source] = [:]
+    private var shortcutProfile: UserShortcutProfile = .releaseDefault
+    private var resolutionSnapshot = ResolutionSnapshot()
+    private let stateLock = NSRecursiveLock()
 
     private let fileManager: FileManager
     private let userAdapterDirectory: URL
@@ -73,12 +79,16 @@ public final class AdapterRegistry: ObservableObject {
 
     /// Check whether an adapter exists for a given app identifier.
     public func hasAdapter(for appID: String) -> Bool {
-        adapters[appID] != nil
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return adapters[appID] != nil
     }
 
     /// Find the adapter for a given app identifier.
     public func adapter(for appID: String) -> Adapter? {
-        adapters[appID]
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return adapters[appID]
     }
 
     /// Find the adapter currently active for an effective app identifier.
@@ -89,12 +99,33 @@ public final class AdapterRegistry: ObservableObject {
     /// Resolve a key event to a native action.
     /// Returns the native KeyCombo to send, or nil if no remapping is needed.
     public func resolve(combo: KeyCombo, forApp appID: String) -> ResolvedAction? {
-        guard let canonicalID = comboToCanonicalID[combo] else { return nil }
-        return actionIndex[appID]?[canonicalID]
+        resolveShortcut(combo: combo, forApp: appID)?.action
+    }
+
+    public func resolveShortcut(
+        combo: KeyCombo,
+        forApp appID: String
+    ) -> ResolvedShortcutAction? {
+        let snapshot = currentResolutionSnapshot()
+        guard snapshot.enabledAdapterIDs.contains(appID),
+              let canonicalID = snapshot.comboToCanonicalID[combo],
+              let action = snapshot.actionIndex[appID]?[canonicalID],
+              let mapping = snapshot.mappingIndex[appID]?[canonicalID]
+        else { return nil }
+
+        return ResolvedShortcutAction(
+            appIdentifier: appID,
+            canonicalID: canonicalID,
+            mapping: mapping,
+            action: action,
+            adapterSource: snapshot.sourceIndex[appID] ?? .builtin
+        )
     }
 
     public func mappingCount(for appID: String) -> Int {
-        adapters[appID]?.mappings.count ?? 0
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return adapters[appID]?.mappings.count ?? 0
     }
 
     public func availability(
@@ -109,7 +140,14 @@ public final class AdapterRegistry: ObservableObject {
             )
         }
 
-        guard let adapter = adapters[appID] else {
+        let snapshotProfile: UserShortcutProfile
+        let adapter: Adapter?
+        stateLock.lock()
+        snapshotProfile = shortcutProfile
+        adapter = adapters[appID]
+        stateLock.unlock()
+
+        guard let adapter else {
             return ShortcutAvailability(
                 state: .noAdapter,
                 appIdentifier: appID,
@@ -117,11 +155,29 @@ public final class AdapterRegistry: ObservableObject {
             )
         }
 
+        guard snapshotProfile.isAdapterEnabled(appID) else {
+            return ShortcutAvailability(
+                state: .paused,
+                appIdentifier: appID,
+                appDisplayName: displayName ?? adapter.appName,
+                adapterIdentifier: adapter.appIdentifier,
+                adapterName: adapter.appName,
+                adapterSource: adapter.source
+            )
+        }
+
         let canonicalByID = Dictionary(
-            uniqueKeysWithValues: canonicalShortcuts.map { ($0.id, $0) }
+            uniqueKeysWithValues: snapshotProfile.shortcuts.map { ($0.id, $0) }
         )
         let shortcuts = adapter.mappings
             .compactMap { mapping -> AvailableShortcut? in
+                guard mapping.isEnabled,
+                      snapshotProfile.isShortcutEnabled(mapping.canonicalID),
+                      snapshotProfile.isMappingEnabled(
+                        adapterID: adapter.appIdentifier,
+                        canonicalID: mapping.canonicalID
+                      )
+                else { return nil }
                 guard let canonical = canonicalByID[mapping.canonicalID] else {
                     return nil
                 }
@@ -138,6 +194,7 @@ public final class AdapterRegistry: ObservableObject {
                     ),
                     nativeKeys: mapping.nativeKeys,
                     menuTitle: mapping.menuTitle,
+                    menuPath: mapping.menuPath,
                     axAction: mapping.axAction,
                     adapterSource: adapter.source
                 )
@@ -170,6 +227,22 @@ public final class AdapterRegistry: ObservableObject {
         case performAXAction(String)
         /// Let the event pass through unmodified.
         case passthrough
+    }
+
+    public struct ResolvedShortcutAction: Equatable {
+        public let appIdentifier: String
+        public let canonicalID: String
+        public let mapping: Adapter.Mapping
+        public let action: ResolvedAction
+        public let adapterSource: Adapter.Source
+    }
+
+    private struct ResolutionSnapshot {
+        var comboToCanonicalID: [KeyCombo: String] = [:]
+        var actionIndex: [String: [String: ResolvedAction]] = [:]
+        var mappingIndex: [String: [String: Adapter.Mapping]] = [:]
+        var sourceIndex: [String: Adapter.Source] = [:]
+        var enabledAdapterIDs: Set<String> = []
     }
 
     private func actionKind(for mapping: Adapter.Mapping) -> AvailableShortcutActionKind {
@@ -324,6 +397,18 @@ public final class AdapterRegistry: ObservableObject {
         ), !title.isEmpty, title.count <= 200 else {
             throw AdapterValidationError.missingMenuTitle(mapping.canonicalID)
         }
+        if let path = mapping.menuPath {
+            guard !path.isEmpty,
+                  path.count <= 8,
+                  path.allSatisfy({
+                      !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          && $0.count <= 200
+                          && !$0.contains("\0")
+                  })
+            else {
+                throw AdapterValidationError.invalidContext(mapping.canonicalID)
+            }
+        }
         guard mapping.axAction == nil else {
             throw AdapterValidationError.unexpectedAXAction(mapping.canonicalID)
         }
@@ -373,19 +458,99 @@ public final class AdapterRegistry: ObservableObject {
             .appendingPathExtension("json")
         let data = try JSONEncoder.pretty.encode(adapter)
         try data.write(to: url, options: .atomic)
+        stateLock.lock()
         adapters[adapter.appIdentifier] = adapter
+        stateLock.unlock()
         rebuildActionIndex()
+    }
+
+    public func deleteUserAdapter(appIdentifier: String) throws {
+        try deleteAdapter(appIdentifier: appIdentifier, from: userAdapterDirectory)
+    }
+
+    public func deleteAutoAdapter(appIdentifier: String) throws {
+        try deleteAdapter(appIdentifier: appIdentifier, from: autoAdapterDirectory)
+    }
+
+    public func deleteEditableAdapter(appIdentifier: String) throws {
+        if fileManager.fileExists(atPath: adapterURL(
+            for: appIdentifier,
+            in: userAdapterDirectory
+        ).path) {
+            try deleteUserAdapter(appIdentifier: appIdentifier)
+        } else {
+            try deleteAutoAdapter(appIdentifier: appIdentifier)
+        }
+    }
+
+    public func exportAdapter(appIdentifier: String, to url: URL) throws {
+        guard let adapter = adapter(for: appIdentifier) else {
+            throw AdapterValidationError.invalidAppIdentifier(appIdentifier)
+        }
+        let data = try JSONEncoder.pretty.encode(adapter)
+        try data.write(to: url, options: .atomic)
+    }
+
+    public func importUserAdapter(from url: URL) throws -> Adapter {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey, .isSymbolicLinkKey])
+        guard values.isSymbolicLink != true else {
+            throw AdapterValidationError.invalidAppIdentifier(url.lastPathComponent)
+        }
+        guard (values.fileSize ?? 0) <= Self.maxAdapterFileSize else {
+            throw AdapterValidationError.fileTooLarge(values.fileSize ?? 0)
+        }
+        let data = try Data(contentsOf: url)
+        let adapter = try JSONDecoder().decode(Adapter.self, from: data)
+        try saveUserAdapter(adapter)
+        return adapter
+    }
+
+    public func setAdapter(_ appIdentifier: String, enabled: Bool) {
+        shortcutProfile.setAdapter(appIdentifier, enabled: enabled)
+        rebuildActionIndex()
+    }
+
+    public func setMapping(
+        adapterID: String,
+        canonicalID: String,
+        enabled: Bool
+    ) {
+        shortcutProfile.setMapping(
+            adapterID: adapterID,
+            canonicalID: canonicalID,
+            enabled: enabled
+        )
+        rebuildActionIndex()
+    }
+
+    private func deleteAdapter(appIdentifier: String, from directory: URL) throws {
+        let url = adapterURL(for: appIdentifier, in: directory)
+        if fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
+        reloadAdapters()
+    }
+
+    private func adapterURL(for appIdentifier: String, in directory: URL) -> URL {
+        directory
+            .appendingPathComponent(safeAdapterFilename(for: appIdentifier))
+            .appendingPathExtension("json")
     }
 
     /// Reload all adapters from disk (called after auto-generation saves a new one).
     public func reloadAdapters() {
+        stateLock.lock()
         adapters.removeAll()
         validationMessages.removeAll()
+        stateLock.unlock()
         loadAllAdapters()
     }
 
     public func applyShortcutProfile(_ profile: UserShortcutProfile) {
+        stateLock.lock()
+        shortcutProfile = profile
         canonicalShortcuts = profile.shortcuts
+        stateLock.unlock()
         rebuildComboIndex()
         rebuildActionIndex()
     }
@@ -436,13 +601,26 @@ public final class AdapterRegistry: ObservableObject {
     private func loadAdapters(from directory: URL) {
         guard let contents = try? fileManager.contentsOfDirectory(
             at: directory,
-            includingPropertiesForKeys: [.fileSizeKey],
+            includingPropertiesForKeys: [.fileSizeKey, .isSymbolicLinkKey, .isRegularFileKey],
             options: .skipsHiddenFiles
         ) else { return }
 
-        for fileURL in contents where fileURL.pathExtension == "json" {
+        let adapterFiles = contents.filter { $0.pathExtension == "json" }
+        if adapterFiles.count > Self.maxAdapterFilesPerDirectory {
+            appendValidationMessage(
+                "\(directory.lastPathComponent): skipped because it contains \(adapterFiles.count) adapter files."
+            )
+            return
+        }
+
+        for fileURL in adapterFiles {
             do {
-                let values = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+                let values = try fileURL.resourceValues(
+                    forKeys: [.fileSizeKey, .isSymbolicLinkKey, .isRegularFileKey]
+                )
+                guard values.isSymbolicLink != true, values.isRegularFile == true else {
+                    throw AdapterValidationError.invalidAppIdentifier(fileURL.lastPathComponent)
+                }
                 let fileSize = values.fileSize ?? 0
                 guard fileSize <= Self.maxAdapterFileSize else {
                     throw AdapterValidationError.fileTooLarge(fileSize)
@@ -451,10 +629,13 @@ public final class AdapterRegistry: ObservableObject {
                 let data = try Data(contentsOf: fileURL)
                 let adapter = try JSONDecoder().decode(Adapter.self, from: data)
                 try Self.validate(adapter: adapter, canonicals: canonicalShortcuts)
+                noteShadowIfNeeded(adapter)
+                stateLock.lock()
                 adapters[adapter.appIdentifier] = adapter
+                stateLock.unlock()
             } catch {
                 let message = "\(fileURL.lastPathComponent): \(error)"
-                validationMessages.append(message)
+                appendValidationMessage(message)
                 ShortyLog.adapterRegistry.warning("Skipped adapter \(message)")
                 continue
             }
@@ -462,23 +643,61 @@ public final class AdapterRegistry: ObservableObject {
     }
 
     private func rebuildComboIndex() {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         comboToCanonicalID = [:]
-        for shortcut in canonicalShortcuts {
+        for shortcut in shortcutProfile.enabledShortcuts {
             comboToCanonicalID[shortcut.defaultKeys] = shortcut.id
         }
+        rebuildResolutionSnapshotLocked()
     }
 
     private func rebuildActionIndex() {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         var nextIndex: [String: [String: ResolvedAction]] = [:]
+        var nextMappingIndex: [String: [String: Adapter.Mapping]] = [:]
+        var nextSourceIndex: [String: Adapter.Source] = [:]
         for adapter in adapters.values {
+            guard shortcutProfile.isAdapterEnabled(adapter.appIdentifier) else { continue }
             var mappingIndex: [String: ResolvedAction] = [:]
+            var adapterMappingIndex: [String: Adapter.Mapping] = [:]
             for mapping in adapter.mappings {
+                guard mapping.isEnabled,
+                      shortcutProfile.isShortcutEnabled(mapping.canonicalID),
+                      shortcutProfile.isMappingEnabled(
+                        adapterID: adapter.appIdentifier,
+                        canonicalID: mapping.canonicalID
+                      )
+                else { continue }
                 guard let action = resolvedAction(for: mapping) else { continue }
                 mappingIndex[mapping.canonicalID] = action
+                adapterMappingIndex[mapping.canonicalID] = mapping
             }
             nextIndex[adapter.appIdentifier] = mappingIndex
+            nextMappingIndex[adapter.appIdentifier] = adapterMappingIndex
+            nextSourceIndex[adapter.appIdentifier] = adapter.source
         }
         actionIndex = nextIndex
+        self.mappingIndex = nextMappingIndex
+        sourceIndex = nextSourceIndex
+        rebuildResolutionSnapshotLocked()
+    }
+
+    private func rebuildResolutionSnapshotLocked() {
+        resolutionSnapshot = ResolutionSnapshot(
+            comboToCanonicalID: comboToCanonicalID,
+            actionIndex: actionIndex,
+            mappingIndex: mappingIndex,
+            sourceIndex: sourceIndex,
+            enabledAdapterIDs: Set(actionIndex.keys)
+        )
+    }
+
+    private func currentResolutionSnapshot() -> ResolutionSnapshot {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return resolutionSnapshot
     }
 
     private func resolvedAction(for mapping: Adapter.Mapping) -> ResolvedAction? {
@@ -503,6 +722,23 @@ public final class AdapterRegistry: ObservableObject {
             .replacingOccurrences(of: "/", with: "_")
     }
 
+    private func appendValidationMessage(_ message: String) {
+        stateLock.lock()
+        validationMessages.append(message)
+        stateLock.unlock()
+    }
+
+    private func noteShadowIfNeeded(_ adapter: Adapter) {
+        stateLock.lock()
+        let existing = adapters[adapter.appIdentifier]
+        stateLock.unlock()
+
+        guard let existing, existing.source != adapter.source else { return }
+        appendValidationMessage(
+            "\(adapter.appIdentifier): \(adapter.source.rawValue) adapter overrides \(existing.source.rawValue) adapter."
+        )
+    }
+
     // MARK: - Built-in adapter catalog
 
     private func loadHardcodedAdapters() {
@@ -511,10 +747,12 @@ public final class AdapterRegistry: ObservableObject {
         for adapter in builtins where adapters[adapter.appIdentifier] == nil {
             do {
                 try Self.validate(adapter: adapter, canonicals: canonicalShortcuts)
+                stateLock.lock()
                 adapters[adapter.appIdentifier] = adapter
+                stateLock.unlock()
             } catch {
                 let message = "\(adapter.appIdentifier): \(error)"
-                validationMessages.append(message)
+                appendValidationMessage(message)
                 ShortyLog.adapterRegistry.error("Invalid built-in adapter \(message)")
             }
         }
@@ -660,12 +898,18 @@ public final class AdapterRegistry: ObservableObject {
         adapter(
             "com.apple.mail",
             "Mail",
-            mappings(commonDocumentMappings, [remap("submit_field", to: "cmd+shift+return")])
+            mappings(
+                commonDocumentMappings,
+                [remap("submit_field", to: "cmd+shift+return", context: "message-compose")]
+            )
         ),
         adapter(
             "com.apple.MobileSMS",
             "Messages",
-            mappings(commonChatMappings, [remap("newline_in_field", to: "option+return")])
+            mappings(
+                commonChatMappings,
+                [remap("newline_in_field", to: "option+return", context: "text-entry")]
+            )
         ),
         adapter("com.apple.Preview", "Preview", commonDocumentMappings),
         adapter("com.apple.iCal", "Calendar", commonDocumentMappings),
@@ -697,7 +941,10 @@ public final class AdapterRegistry: ObservableObject {
         adapter(
             "com.tinyspeck.slackmacgap",
             "Slack",
-            mappings(commonChatMappings, [remap("newline_in_field", to: "option+return")])
+            mappings(
+                commonChatMappings,
+                [remap("newline_in_field", to: "option+return", context: "text-entry")]
+            )
         ),
         adapter("com.hnc.Discord", "Discord", commonChatMappings),
         adapter("ru.keepcoder.Telegram", "Telegram", commonChatMappings),
@@ -793,7 +1040,11 @@ public final class AdapterRegistry: ObservableObject {
         adapter(
             "web:slack.com",
             "Slack Web",
-            mappings(commonBrowserMappings, commonChatMappings, [remap("newline_in_field", to: "option+return")])
+            mappings(
+                commonBrowserMappings,
+                commonChatMappings,
+                [remap("newline_in_field", to: "option+return", context: "text-entry")]
+            )
         ),
         adapter(
             "web:mail.google.com",
@@ -801,7 +1052,7 @@ public final class AdapterRegistry: ObservableObject {
             mappings(
                 commonBrowserMappings,
                 [
-                    remap("submit_field", to: "cmd+return"),
+                    remap("submit_field", to: "cmd+return", context: "message-compose"),
                     passthrough("newline_in_field")
                 ]
             )
@@ -887,12 +1138,14 @@ public final class AdapterRegistry: ObservableObject {
 
     private static func remap(
         _ canonicalID: String,
-        to nativeKeys: String
+        to nativeKeys: String,
+        context: String? = nil
     ) -> Adapter.Mapping {
         Adapter.Mapping(
             canonicalID: canonicalID,
             method: .keyRemap,
-            nativeKeys: keyCombo(nativeKeys)
+            nativeKeys: keyCombo(nativeKeys),
+            context: context
         )
     }
 

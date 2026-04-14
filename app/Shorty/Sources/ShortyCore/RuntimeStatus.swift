@@ -14,18 +14,28 @@ public struct EngineConfiguration: Equatable {
     /// Maximum time the UI waits for an adapter preview before reporting a
     /// timeout. The underlying Accessibility query is best-effort.
     public let adapterGenerationTimeout: TimeInterval
+    public let startsEventTap: Bool
+    public let startsBrowserBridge: Bool
 
     public init(
         autoGenerateMenuAdapters: Bool = false,
         reportAllBrowserDomains: Bool = false,
-        adapterGenerationTimeout: TimeInterval = 3
+        adapterGenerationTimeout: TimeInterval = 3,
+        startsEventTap: Bool = true,
+        startsBrowserBridge: Bool = true
     ) {
         self.autoGenerateMenuAdapters = autoGenerateMenuAdapters
         self.reportAllBrowserDomains = reportAllBrowserDomains
         self.adapterGenerationTimeout = adapterGenerationTimeout
+        self.startsEventTap = startsEventTap
+        self.startsBrowserBridge = startsBrowserBridge
     }
 
     public static let releaseDefault = EngineConfiguration()
+    public static let appStoreCandidate = EngineConfiguration(
+        startsEventTap: false,
+        startsBrowserBridge: false
+    )
 }
 
 public enum PermissionState: String, Codable, Equatable {

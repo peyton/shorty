@@ -1,27 +1,129 @@
 import Foundation
+#if os(macOS)
+import Carbon
+#endif
 
 public struct UserShortcutProfile: Codable, Equatable, Identifiable {
+    public static let defaultsKey = "Shorty.UserShortcutProfile"
+
     public let id: String
     public var name: String
     public var shortcuts: [CanonicalShortcut]
+    public var disabledShortcutIDs: Set<String>
+    public var disabledAdapterIDs: Set<String>
+    public var disabledMappingIDsByAdapter: [String: Set<String>]
     public var updatedAt: Date
 
     public init(
         id: String = "default",
         name: String = "Default",
         shortcuts: [CanonicalShortcut] = CanonicalShortcut.defaults,
+        disabledShortcutIDs: Set<String> = [],
+        disabledAdapterIDs: Set<String> = [],
+        disabledMappingIDsByAdapter: [String: Set<String>] = [:],
         updatedAt: Date = Date()
     ) {
         self.id = id
         self.name = name
         self.shortcuts = shortcuts
+        self.disabledShortcutIDs = disabledShortcutIDs
+        self.disabledAdapterIDs = disabledAdapterIDs
+        self.disabledMappingIDsByAdapter = disabledMappingIDsByAdapter
         self.updatedAt = updatedAt
     }
 
     public static let releaseDefault = UserShortcutProfile()
 
     public func conflicts() -> [ShortcutConflict] {
-        ShortcutConflict.detect(in: shortcuts)
+        ShortcutConflict.detect(in: enabledShortcuts)
+    }
+
+    public var enabledShortcuts: [CanonicalShortcut] {
+        shortcuts.filter { !disabledShortcutIDs.contains($0.id) }
+    }
+
+    public func isShortcutEnabled(_ shortcutID: String) -> Bool {
+        !disabledShortcutIDs.contains(shortcutID)
+    }
+
+    public func isAdapterEnabled(_ appIdentifier: String) -> Bool {
+        !disabledAdapterIDs.contains(appIdentifier)
+    }
+
+    public func isMappingEnabled(adapterID: String, canonicalID: String) -> Bool {
+        !(disabledMappingIDsByAdapter[adapterID]?.contains(canonicalID) ?? false)
+    }
+
+    public mutating func setShortcut(_ shortcutID: String, enabled: Bool) {
+        if enabled {
+            disabledShortcutIDs.remove(shortcutID)
+        } else {
+            disabledShortcutIDs.insert(shortcutID)
+        }
+        updatedAt = Date()
+    }
+
+    public mutating func updateShortcut(_ shortcutID: String, keyCombo: KeyCombo) {
+        guard let index = shortcuts.firstIndex(where: { $0.id == shortcutID }) else { return }
+        let shortcut = shortcuts[index]
+        shortcuts[index] = CanonicalShortcut(
+            id: shortcut.id,
+            name: shortcut.name,
+            defaultKeys: keyCombo,
+            category: shortcut.category,
+            description: shortcut.description
+        )
+        updatedAt = Date()
+    }
+
+    public mutating func resetShortcut(_ shortcutID: String) {
+        guard let defaultShortcut = CanonicalShortcut.defaults.first(where: { $0.id == shortcutID }),
+              let index = shortcuts.firstIndex(where: { $0.id == shortcutID })
+        else { return }
+        shortcuts[index] = defaultShortcut
+        disabledShortcutIDs.remove(shortcutID)
+        updatedAt = Date()
+    }
+
+    public mutating func setAdapter(_ appIdentifier: String, enabled: Bool) {
+        if enabled {
+            disabledAdapterIDs.remove(appIdentifier)
+        } else {
+            disabledAdapterIDs.insert(appIdentifier)
+        }
+        updatedAt = Date()
+    }
+
+    public mutating func setMapping(
+        adapterID: String,
+        canonicalID: String,
+        enabled: Bool
+    ) {
+        var disabled = disabledMappingIDsByAdapter[adapterID] ?? []
+        if enabled {
+            disabled.remove(canonicalID)
+        } else {
+            disabled.insert(canonicalID)
+        }
+        if disabled.isEmpty {
+            disabledMappingIDsByAdapter.removeValue(forKey: adapterID)
+        } else {
+            disabledMappingIDsByAdapter[adapterID] = disabled
+        }
+        updatedAt = Date()
+    }
+
+    public func encodedJSON() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(self)
+    }
+
+    public static func decode(from data: Data) throws -> UserShortcutProfile {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(UserShortcutProfile.self, from: data)
     }
 }
 
@@ -77,6 +179,24 @@ public struct ShortcutConflict: Codable, Equatable, Identifiable {
             )
         }
 
+        let reservedCombos: [KeyCombo: String] = [
+            KeyCombo(keyCode: 0x31, modifiers: .command): "Spotlight and system search commonly use Command-Space.",
+            KeyCombo(keyCode: 0x35, modifiers: .command): "Command-Escape can be reserved by macOS assistive features.",
+            KeyCombo(keyCode: 0x0C, modifiers: [.command, .option]): "Command-Option-Q is commonly used to quit or lock workflows.",
+            KeyCombo(keyCode: 0x08, modifiers: [.command, .option, .control]): "Command-Control-Option-C is commonly claimed by system utilities."
+        ]
+        for shortcut in shortcuts {
+            guard let message = reservedCombos[shortcut.defaultKeys] else { continue }
+            conflicts.append(
+                ShortcutConflict(
+                    kind: .macOSReserved,
+                    shortcutIDs: [shortcut.id],
+                    keyCombo: shortcut.defaultKeys,
+                    message: "\(shortcut.name) uses \(shortcut.defaultKeys.displayString). \(message)"
+                )
+            )
+        }
+
         return conflicts.sorted { $0.id < $1.id }
     }
 }
@@ -95,6 +215,43 @@ public struct KeyboardLayoutDescriptor: Codable, Equatable {
         self.localizedName = localizedName
         self.keyboardType = keyboardType
     }
+}
+
+extension KeyboardLayoutDescriptor {
+    public static func current() -> KeyboardLayoutDescriptor {
+        #if os(macOS)
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue()
+        else {
+            return KeyboardLayoutDescriptor()
+        }
+
+        return KeyboardLayoutDescriptor(
+            inputSourceID: stringProperty(source, kTISPropertyInputSourceID) ?? "unknown",
+            localizedName: stringProperty(source, kTISPropertyLocalizedName)
+                ?? "Unknown keyboard layout",
+            keyboardType: TISGetInputSourceProperty(
+                source,
+                kTISPropertyUnicodeKeyLayoutData
+            ) == nil ? "input-source" : "unicode-layout"
+        )
+        #else
+        return KeyboardLayoutDescriptor()
+        #endif
+    }
+
+    #if os(macOS)
+    private static func stringProperty(
+        _ source: TISInputSource,
+        _ property: CFString
+    ) -> String? {
+        guard let rawValue = TISGetInputSourceProperty(source, property) else {
+            return nil
+        }
+        return Unmanaged<CFString>
+            .fromOpaque(rawValue)
+            .takeUnretainedValue() as String
+    }
+    #endif
 }
 
 public struct ShortcutCaptureResult: Codable, Equatable {
@@ -130,18 +287,52 @@ public struct AdapterReview: Codable, Equatable, Identifiable {
     public let confidence: Double
     public let reasons: [String]
     public let warnings: [String]
+    public let requiresExplicitApproval: Bool
 
     public init(
         adapterIdentifier: String,
         confidence: Double,
         reasons: [String] = [],
-        warnings: [String] = []
+        warnings: [String] = [],
+        requiresExplicitApproval: Bool = false
     ) {
         self.adapterIdentifier = adapterIdentifier
         self.confidence = confidence
         self.reasons = reasons
         self.warnings = warnings
+        self.requiresExplicitApproval = requiresExplicitApproval
         self.id = adapterIdentifier
+    }
+}
+
+public struct LastShortcutActionDiagnostic: Codable, Equatable {
+    public let createdAt: Date
+    public let appIdentifier: String?
+    public let appName: String?
+    public let canonicalID: String
+    public let actionKind: AvailableShortcutActionKind
+    public let actionDescription: String
+    public let succeeded: Bool?
+    public let detail: String
+
+    public init(
+        createdAt: Date = Date(),
+        appIdentifier: String?,
+        appName: String?,
+        canonicalID: String,
+        actionKind: AvailableShortcutActionKind,
+        actionDescription: String,
+        succeeded: Bool? = nil,
+        detail: String
+    ) {
+        self.createdAt = createdAt
+        self.appIdentifier = appIdentifier
+        self.appName = appName
+        self.canonicalID = canonicalID
+        self.actionKind = actionKind
+        self.actionDescription = actionDescription
+        self.succeeded = succeeded
+        self.detail = detail
     }
 }
 
@@ -363,7 +554,18 @@ public struct RuntimeDiagnosticSnapshot: Codable, Equatable {
     public let bridgeStatus: String
     public let safariExtensionStatus: SafariExtensionStatus
     public let eventsIntercepted: Int
+    public let eventsMatched: Int
     public let eventsRemapped: Int
+    public let eventsPassedThrough: Int
+    public let menuActionsInvoked: Int
+    public let menuActionsSucceeded: Int
+    public let menuActionsFailed: Int
+    public let accessibilityActionsInvoked: Int
+    public let accessibilityActionsSucceeded: Int
+    public let accessibilityActionsFailed: Int
+    public let contextGuardsApplied: Int
+    public let lastAction: LastShortcutActionDiagnostic?
+    public let distributionMode: String
     public let adapterValidationMessages: [String]
 
     public init(
@@ -378,7 +580,18 @@ public struct RuntimeDiagnosticSnapshot: Codable, Equatable {
         bridgeStatus: String,
         safariExtensionStatus: SafariExtensionStatus,
         eventsIntercepted: Int,
+        eventsMatched: Int = 0,
         eventsRemapped: Int,
+        eventsPassedThrough: Int = 0,
+        menuActionsInvoked: Int = 0,
+        menuActionsSucceeded: Int = 0,
+        menuActionsFailed: Int = 0,
+        accessibilityActionsInvoked: Int = 0,
+        accessibilityActionsSucceeded: Int = 0,
+        accessibilityActionsFailed: Int = 0,
+        contextGuardsApplied: Int = 0,
+        lastAction: LastShortcutActionDiagnostic? = nil,
+        distributionMode: String = "Unknown",
         adapterValidationMessages: [String]
     ) {
         self.createdAt = createdAt
@@ -392,7 +605,18 @@ public struct RuntimeDiagnosticSnapshot: Codable, Equatable {
         self.bridgeStatus = bridgeStatus
         self.safariExtensionStatus = safariExtensionStatus
         self.eventsIntercepted = eventsIntercepted
+        self.eventsMatched = eventsMatched
         self.eventsRemapped = eventsRemapped
+        self.eventsPassedThrough = eventsPassedThrough
+        self.menuActionsInvoked = menuActionsInvoked
+        self.menuActionsSucceeded = menuActionsSucceeded
+        self.menuActionsFailed = menuActionsFailed
+        self.accessibilityActionsInvoked = accessibilityActionsInvoked
+        self.accessibilityActionsSucceeded = accessibilityActionsSucceeded
+        self.accessibilityActionsFailed = accessibilityActionsFailed
+        self.contextGuardsApplied = contextGuardsApplied
+        self.lastAction = lastAction
+        self.distributionMode = distributionMode
         self.adapterValidationMessages = adapterValidationMessages
     }
 }
@@ -401,16 +625,21 @@ public struct SupportBundleSummary: Codable, Equatable {
     public let appVersion: String
     public let updateStatus: UpdateStatus
     public let launchAtLoginStatus: LaunchAtLoginStatus
+    public let bridgeInstallStatuses: [BridgeInstallStatus]
+    public let adapterRevisionCount: Int
     public let adapterCount: Int
     public let adapterCountsBySource: [String: Int]
     public let supportedWebDomains: [String]
     public let validationWarningCount: Int
     public let activeAvailability: ShortcutAvailability
+    public let generatedAdapterReview: AdapterReview?
 
     public init(
         appVersion: String = "Unknown",
         updateStatus: UpdateStatus = UpdateStatus(),
         launchAtLoginStatus: LaunchAtLoginStatus = LaunchAtLoginStatus(),
+        bridgeInstallStatuses: [BridgeInstallStatus] = [],
+        adapterRevisionCount: Int = 0,
         adapterCount: Int = 0,
         adapterCountsBySource: [String: Int] = [:],
         supportedWebDomains: [String] = [],
@@ -419,16 +648,20 @@ public struct SupportBundleSummary: Codable, Equatable {
             state: .noActiveApp,
             appIdentifier: nil,
             appDisplayName: "Unknown"
-        )
+        ),
+        generatedAdapterReview: AdapterReview? = nil
     ) {
         self.appVersion = appVersion
         self.updateStatus = updateStatus
         self.launchAtLoginStatus = launchAtLoginStatus
+        self.bridgeInstallStatuses = bridgeInstallStatuses
+        self.adapterRevisionCount = adapterRevisionCount
         self.adapterCount = adapterCount
         self.adapterCountsBySource = adapterCountsBySource
         self.supportedWebDomains = supportedWebDomains
         self.validationWarningCount = validationWarningCount
         self.activeAvailability = activeAvailability
+        self.generatedAdapterReview = generatedAdapterReview
     }
 }
 

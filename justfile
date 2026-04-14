@@ -24,8 +24,16 @@ test-app:
     bash scripts/tooling/test_app.sh
 
 [group('app')]
+typecheck-app:
+    bash scripts/tooling/typecheck_app.sh
+
+[group('app')]
 install-browser-bridge EXTENSION_ID='' BROWSERS='chrome':
     extension_id="{{EXTENSION_ID}}"; extension_id="${extension_id#EXTENSION_ID=}"; browsers="{{BROWSERS}}"; browsers="${browsers#BROWSERS=}"; bash scripts/tooling/install_browser_bridge.sh --extension-id "$extension_id" --browsers "$browsers"
+
+[group('app')]
+adapter-coverage-audit:
+    uv run python -m scripts.tooling.adapter_coverage_audit
 
 [group('app')]
 uninstall-browser-bridge BROWSERS='chrome':

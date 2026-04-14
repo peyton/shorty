@@ -50,6 +50,7 @@ public struct AvailableShortcut: Codable, Equatable, Identifiable {
     public let actionDescription: String
     public let nativeKeys: KeyCombo?
     public let menuTitle: String?
+    public let menuPath: [String]?
     public let axAction: String?
     public let adapterSource: Adapter.Source
 
@@ -62,6 +63,7 @@ public struct AvailableShortcut: Codable, Equatable, Identifiable {
         actionDescription: String,
         nativeKeys: KeyCombo? = nil,
         menuTitle: String? = nil,
+        menuPath: [String]? = nil,
         axAction: String? = nil,
         adapterSource: Adapter.Source
     ) {
@@ -73,6 +75,7 @@ public struct AvailableShortcut: Codable, Equatable, Identifiable {
         self.actionDescription = actionDescription
         self.nativeKeys = nativeKeys
         self.menuTitle = menuTitle
+        self.menuPath = menuPath
         self.axAction = axAction
         self.adapterSource = adapterSource
     }
@@ -82,6 +85,7 @@ public struct ShortcutAvailability: Codable, Equatable {
     public enum State: String, Codable {
         case noActiveApp
         case noAdapter
+        case paused
         case available
     }
 
@@ -117,6 +121,8 @@ public struct ShortcutAvailability: Codable, Equatable {
             return "No active app"
         case .noAdapter:
             return "Pass through"
+        case .paused:
+            return "Paused"
         case .available:
             return "\(shortcuts.count) available"
         }
@@ -128,8 +134,18 @@ public struct ShortcutAvailability: Codable, Equatable {
             return "Shorty will show shortcuts after an app is active."
         case .noAdapter:
             return "Shorty does not have shortcuts for \(appDisplayName) yet."
+        case .paused:
+            return "Shorty is paused for \(appDisplayName)."
         case .available:
-            return "Shorty is ready for \(adapterName ?? appDisplayName)."
+            let native = shortcuts.filter { $0.actionKind == .passthrough }.count
+            let remapped = shortcuts.filter { $0.actionKind == .keyRemap }.count
+            let menu = shortcuts.filter { $0.actionKind == .menuInvoke || $0.actionKind == .axAction }.count
+            let parts = [
+                native > 0 ? "\(native) native" : nil,
+                remapped > 0 ? "\(remapped) remapped" : nil,
+                menu > 0 ? "\(menu) menu/action" : nil
+            ].compactMap { $0 }
+            return "For \(adapterName ?? appDisplayName): \(parts.joined(separator: ", "))."
         }
     }
 }
