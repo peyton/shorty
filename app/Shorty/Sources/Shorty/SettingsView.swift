@@ -266,6 +266,7 @@ struct SettingsActions {
     let checkForUpdates: () -> Void
     let openSafariExtensionSettings: () -> Void
     let exportSupportBundle: () -> Void
+    let copySupportBundle: () -> Void
 
     static let noop = SettingsActions(
         openAccessibilitySettings: {},
@@ -278,7 +279,8 @@ struct SettingsActions {
         setAutomaticUpdates: { _ in },
         checkForUpdates: {},
         openSafariExtensionSettings: {},
-        exportSupportBundle: {}
+        exportSupportBundle: {},
+        copySupportBundle: {}
     )
 
     static func live(engine: ShortcutEngine) -> SettingsActions {
@@ -322,6 +324,19 @@ struct SettingsActions {
                     try engine.exportSupportBundle(to: url)
                 } catch {
                     engine.lastError = "Could not export support bundle: \(error.localizedDescription)"
+                }
+            },
+            copySupportBundle: {
+                do {
+                    let data = try engine.supportBundle().encodedJSON()
+                    guard let json = String(data: data, encoding: .utf8) else {
+                        engine.lastError = "Could not encode support bundle as text."
+                        return
+                    }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(json, forType: .string)
+                } catch {
+                    engine.lastError = "Could not copy support bundle: \(error.localizedDescription)"
                 }
             }
         )
@@ -609,12 +624,14 @@ private struct SettingsCategoryList: View {
     @Binding var selectedCategory: CanonicalShortcut.Category?
 
     var body: some View {
-        List(
-            CanonicalShortcut.Category.allCases,
-            id: \.self,
-            selection: $selectedCategory
-        ) { category in
-            Label(category.rawValue.capitalized, systemImage: iconFor(category))
+        List(selection: $selectedCategory) {
+            Label("All Shortcuts", systemImage: "keyboard")
+                .tag(CanonicalShortcut.Category?.none)
+
+            ForEach(CanonicalShortcut.Category.allCases, id: \.self) { category in
+                Label(category.rawValue.capitalized, systemImage: iconFor(category))
+                    .tag(CanonicalShortcut.Category?.some(category))
+            }
         }
         .listStyle(.sidebar)
         .frame(minWidth: 150, maxWidth: 190)
@@ -633,19 +650,54 @@ private struct SettingsShortcutList: View {
                 .textFieldStyle(.roundedBorder)
 
             if !conflicts.isEmpty {
-                Label(
-                    "\(conflicts.count) shortcut review item\(conflicts.count == 1 ? "" : "s")",
-                    systemImage: "exclamationmark.triangle"
-                )
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(conflicts) { conflict in
+                            ShortcutConflictRow(conflict: conflict)
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Label(
+                        "\(conflicts.count) shortcut review item\(conflicts.count == 1 ? "" : "s")",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundColor(ShortyBrand.amber)
+                }
                 .font(.caption)
-                .foregroundColor(ShortyBrand.amber)
             }
 
-            List(shortcuts) { shortcut in
-                SettingsShortcutRow(shortcut: shortcut)
+            if shortcuts.isEmpty {
+                EmptySettingsState(
+                    title: "No shortcuts found",
+                    detail: "Try a different search or choose All Shortcuts."
+                )
+                Spacer()
+            } else {
+                List(shortcuts) { shortcut in
+                    SettingsShortcutRow(shortcut: shortcut)
+                }
             }
         }
         .padding()
+    }
+}
+
+private struct ShortcutConflictRow: View {
+    let conflict: ShortcutConflict
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(conflict.message)
+                .fontWeight(.medium)
+            Text("Shortcuts: \(conflict.shortcutIDs.joined(separator: ", "))")
+                .foregroundColor(.secondary)
+            if let keyCombo = conflict.keyCombo {
+                Text("Keys: \(keyCombo.displayString)")
+                    .foregroundColor(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -781,17 +833,15 @@ private struct AdvancedDiagnosticsSection: View {
                 SettingsInfoRow("Browser source", diagnostics.browserContextSource.title)
                 SettingsInfoRow("Events intercepted", "\(diagnostics.eventsIntercepted)")
                 SettingsInfoRow("Events translated", "\(diagnostics.eventsRemapped)")
-                Button("Export Support Bundle", action: actions.exportSupportBundle)
-                    .controlSize(.small)
+                HStack {
+                    Button("Export Support Bundle", action: actions.exportSupportBundle)
+                    Button("Copy Diagnostics", action: actions.copySupportBundle)
+                }
+                .controlSize(.small)
 
                 if !validationMessages.isEmpty {
                     Divider()
-                    Label(
-                        "\(validationMessages.count) adapter warning\(validationMessages.count == 1 ? "" : "s")",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .font(.caption)
-                    .foregroundColor(ShortyBrand.amber)
+                    AdapterValidationWarnings(messages: validationMessages)
                 }
             }
         }
@@ -1002,6 +1052,12 @@ private struct SettingsShortcutRow: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
+            Text(shortcut.category.rawValue.capitalized)
+                .font(.caption2.weight(.semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.1), in: Capsule())
             ShortcutKeyBadge(text: shortcut.defaultKeys.displayString)
         }
         .padding(.vertical, 2)
@@ -1019,6 +1075,17 @@ private struct SettingsAdaptersTab: View {
     let activeAvailability: ShortcutAvailability
     let accessibilityGranted: Bool
     let actions: SettingsActions
+
+    private var adapterSourceCounts: [(source: Adapter.Source, count: Int)] {
+        Dictionary(grouping: adapters, by: \.source)
+            .map { (source: $0.key, count: $0.value.count) }
+            .sorted { lhs, rhs in
+                if lhs.source.sortOrder != rhs.source.sortOrder {
+                    return lhs.source.sortOrder < rhs.source.sortOrder
+                }
+                return lhs.source.rawValue < rhs.source.rawValue
+            }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1039,20 +1106,91 @@ private struct SettingsAdaptersTab: View {
             TextField("Search apps", text: $searchText)
                 .textFieldStyle(.roundedBorder)
 
-            List(adapters) { adapter in
-                SettingsAdapterRow(adapter: adapter, canonicalByID: canonicalByID)
+            AdapterSourceSummary(counts: adapterSourceCounts)
+
+            if adapters.isEmpty {
+                EmptySettingsState(
+                    title: "No apps found",
+                    detail: "Try a different search or add support for the current app."
+                )
+                Spacer()
+            } else {
+                List(adapters) { adapter in
+                    SettingsAdapterRow(adapter: adapter, canonicalByID: canonicalByID)
+                }
             }
 
             if !validationMessages.isEmpty {
-                Label(
-                    "\(validationMessages.count) adapter file\(validationMessages.count == 1 ? "" : "s") need review.",
-                    systemImage: "exclamationmark.triangle"
-                )
-                .font(.caption)
-                .foregroundColor(ShortyBrand.amber)
+                AdapterValidationWarnings(messages: validationMessages)
             }
         }
         .padding()
+    }
+}
+
+private struct AdapterSourceSummary: View {
+    let counts: [(source: Adapter.Source, count: Int)]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(counts, id: \.source) { item in
+                Text("\(item.source.settingsLabel): \(item.count)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.1), in: Capsule())
+            }
+            Spacer()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            counts
+                .map { "\($0.source.settingsLabel) \($0.count)" }
+                .joined(separator: ", ")
+        )
+    }
+}
+
+private struct AdapterValidationWarnings: View {
+    let messages: [String]
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(messages, id: \.self) { message in
+                    Text(message)
+                        .font(.caption2.monospaced())
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.top, 4)
+        } label: {
+            Label(
+                "\(messages.count) adapter file\(messages.count == 1 ? "" : "s") need review.",
+                systemImage: "exclamationmark.triangle"
+            )
+        }
+        .font(.caption)
+        .foregroundColor(ShortyBrand.amber)
+    }
+}
+
+private struct EmptySettingsState: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.callout.weight(.semibold))
+            Text(detail)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 12)
     }
 }
 
@@ -1401,6 +1539,19 @@ private func iconFor(_ category: CanonicalShortcut.Category) -> String {
 }
 
 private extension Adapter.Source {
+    var sortOrder: Int {
+        switch self {
+        case .builtin:
+            return 0
+        case .menuIntrospection, .llmGenerated:
+            return 1
+        case .community:
+            return 2
+        case .user:
+            return 3
+        }
+    }
+
     var settingsLabel: String {
         switch self {
         case .builtin:

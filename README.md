@@ -19,6 +19,7 @@ Useful docs:
 - [Release hardening ExecPlan](docs/release-hardening-execplan.md)
 - [Open source distribution](docs/open-source.md)
 - [Troubleshooting](docs/troubleshooting.md)
+- [Adapter JSON schema](docs/adapter-schema.md)
 - [App workspace notes](app/README.md)
 
 ## Requirements

@@ -58,6 +58,21 @@ final class ReleaseModelsTests: XCTestCase {
             adapterValidationMessages: []
         )
         let bundle = SupportBundle(
+            summary: SupportBundleSummary(
+                appVersion: "1.0.0 (1)",
+                adapterCount: 1,
+                adapterCountsBySource: ["builtin": 1],
+                supportedWebDomains: ["figma.com"],
+                validationWarningCount: 0,
+                activeAvailability: ShortcutAvailability(
+                    state: .available,
+                    appIdentifier: "web:figma.com",
+                    appDisplayName: "Figma Web",
+                    adapterIdentifier: "web:figma.com",
+                    adapterName: "Figma Web",
+                    adapterSource: .builtin
+                )
+            ),
             diagnostics: diagnostics,
             shortcutProfile: .releaseDefault,
             adapters: ["web:figma.com"]
@@ -65,7 +80,10 @@ final class ReleaseModelsTests: XCTestCase {
 
         let json = try XCTUnwrap(String(data: bundle.encodedJSON(), encoding: .utf8))
 
+        XCTAssertTrue(json.contains(#""adapterCount" : 1"#))
+        XCTAssertTrue(json.contains(#""appVersion" : "1.0.0 (1)""#))
         XCTAssertTrue(json.contains(#""browserContextSource" : "safariExtension""#))
+        XCTAssertTrue(json.contains(#""supportedWebDomains" : ["#))
         XCTAssertTrue(json.contains(#""web:figma.com""#))
     }
 
@@ -129,6 +147,31 @@ final class ReleaseModelsTests: XCTestCase {
         XCTAssertEqual(snapshot.webDomain, "figma.com")
         XCTAssertEqual(snapshot.effectiveAppID, "web:figma.com")
         XCTAssertEqual(engine.safariExtensionStatus.state, .enabled)
+    }
+
+    func testShortcutEngineSupportBundleIncludesSummaryMetadata() {
+        let suiteName = "ShortyTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let engine = ShortcutEngine(
+            userDefaults: defaults,
+            safariExtensionUserDefaults: defaults
+        )
+
+        engine.appMonitor.updateActiveApplication(
+            bundleIdentifier: "com.apple.Safari",
+            localizedName: "Safari",
+            processIdentifier: 501
+        )
+        engine.recordSafariExtensionMessage(domain: "docs.google.com")
+
+        let bundle = engine.supportBundle()
+
+        XCTAssertEqual(bundle.summary.adapterCount, bundle.adapters.count)
+        XCTAssertGreaterThan(bundle.summary.adapterCountsBySource["builtin"] ?? 0, 0)
+        XCTAssertTrue(bundle.summary.supportedWebDomains.contains("docs.google.com"))
+        XCTAssertEqual(bundle.summary.activeAvailability.state, .available)
+        XCTAssertEqual(bundle.summary.activeAvailability.adapterIdentifier, "web:docs.google.com")
     }
 
     func testSafariExtensionBridgeMessageRefreshClearsDomain() throws {

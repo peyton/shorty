@@ -1,5 +1,6 @@
 import Carbon.HIToolbox
 import CoreGraphics
+import Foundation
 
 /// A keyboard combination: a virtual keycode plus modifier flags.
 ///
@@ -21,11 +22,20 @@ public struct KeyCombo: Codable, Hashable, CustomStringConvertible {
     /// Parse a human-readable string like "cmd+shift+l" into a KeyCombo.
     /// Returns nil if any component is unrecognized.
     public init?(from string: String) {
-        let parts = string.lowercased().split(separator: "+").map(String.init)
+        let parts = string
+            .split(separator: "+", omittingEmptySubsequences: false)
+            .map {
+                String($0)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+            }
+        guard !parts.isEmpty else { return nil }
+
         var mods: Modifiers = []
         var key: String?
 
         for part in parts {
+            guard !part.isEmpty else { return nil }
             switch part {
             case "cmd", "command", "⌘":
                 mods.insert(.command)
@@ -36,7 +46,7 @@ public struct KeyCombo: Codable, Hashable, CustomStringConvertible {
             case "ctrl", "control", "⌃":
                 mods.insert(.control)
             default:
-                // Last non-modifier part is the key
+                guard key == nil else { return nil }
                 key = part
             }
         }

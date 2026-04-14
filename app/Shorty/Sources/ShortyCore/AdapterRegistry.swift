@@ -228,6 +228,12 @@ public final class AdapterRegistry: ObservableObject {
         guard !appIdentifier.isEmpty else {
             throw AdapterValidationError.emptyAppIdentifier
         }
+        guard appIdentifier == adapter.appIdentifier,
+              appIdentifier.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+              appIdentifier.rangeOfCharacter(from: .controlCharacters) == nil
+        else {
+            throw AdapterValidationError.invalidAppIdentifier(adapter.appIdentifier)
+        }
         guard appIdentifier.count <= 200,
               !appIdentifier.contains("/"),
               !appIdentifier.contains("\0")

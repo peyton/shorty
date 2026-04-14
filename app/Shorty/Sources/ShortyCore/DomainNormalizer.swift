@@ -42,7 +42,7 @@ public enum DomainNormalizer {
 
     /// Collapse known subdomains to the supported web app domain.
     public static func normalizedDomain(for host: String) -> String {
-        let cleaned = host
+        let cleaned = hostOnly(from: host)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .trimmingCharacters(in: CharacterSet(charactersIn: "."))
@@ -60,6 +60,37 @@ public enum DomainNormalizer {
         }
 
         return withoutWWW
+    }
+
+    private static func hostOnly(from input: String) -> String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        if let parsedHost = URLComponents(string: trimmed)?.host,
+           !parsedHost.isEmpty {
+            return parsedHost
+        }
+
+        var candidate = trimmed
+        if let schemeRange = candidate.range(of: "://") {
+            candidate = String(candidate[schemeRange.upperBound...])
+        }
+
+        if let boundary = candidate.firstIndex(where: { character in
+            character == "/" || character == "?" || character == "#"
+        }) {
+            candidate = String(candidate[..<boundary])
+        }
+
+        if let colon = candidate.lastIndex(of: ":") {
+            let portStart = candidate.index(after: colon)
+            let possiblePort = candidate[portStart...]
+            if !possiblePort.isEmpty, possiblePort.allSatisfy(\.isNumber) {
+                candidate = String(candidate[..<colon])
+            }
+        }
+
+        return candidate
     }
 
     private static func matches(_ host: String, root: String) -> Bool {

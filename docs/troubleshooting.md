@@ -42,6 +42,23 @@ Generated menu-introspection adapters are disabled by default for release. Use
 the explicit Generate Adapter action in Settings, review the preview, then save
 only adapters you trust.
 
+## Diagnostics and Support Bundles
+
+When a problem is hard to describe from the popover alone, open Settings >
+Advanced and choose **Export Support Bundle** or **Copy Diagnostics**. The
+support bundle is JSON and includes:
+
+- the current engine, permission, browser bridge, and Safari extension state
+- the active app or web-app adapter Shorty is using
+- adapter counts by source, supported web domains, and adapter validation
+  warnings
+- the current shortcut profile and any shortcut review notes
+- Launch at Login and direct-download update status
+
+The bundle does not include keystroke contents, documents, browser page titles,
+or file contents. If adapter warnings are visible in Settings, expand them before
+filing an issue so you can include the exact skipped adapter filename and error.
+
 ## Browser Bridge
 
 The browser bridge is optional. Native macOS app support works without it.
