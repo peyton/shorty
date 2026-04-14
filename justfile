@@ -90,7 +90,10 @@ clean: clean-generated
 test-python:
     uv run pytest tests -v
 
-test: test-app test-python
+integration:
+    uv run python -m scripts.tooling.macos_integration
+
+test: test-app test-python integration
 
 lint: web-check
     bash scripts/tooling/lint.sh
@@ -105,4 +108,4 @@ ci-python: test-python
 ci-build:
     bash scripts/tooling/ci_build.sh
 
-ci: ci-lint ci-python test-app web-build ci-build
+ci: ci-lint ci-python test-app integration web-build ci-build

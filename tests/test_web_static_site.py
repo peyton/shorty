@@ -1,18 +1,82 @@
 from __future__ import annotations
 
+import json
+import struct
 import tarfile
 from pathlib import Path
+from xml.etree import ElementTree
 
 from scripts.web.package_static_site import package_site, sha256_file
 from scripts.web.validate_static_site import validate_site
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SVG_NAMESPACE = "{http://www.w3.org/2000/svg}"
+BRAND_SVG_ASSETS = (
+    "app-icon.svg",
+    "command-map-hero.svg",
+    "glyph-native.svg",
+    "glyph-bridge.svg",
+    "glyph-checksum.svg",
+    "glyph-diagnostics.svg",
+    "glyph-support.svg",
+)
+APP_ICON_SIZES = {
+    "app-icon-16.png": (16, 16),
+    "app-icon-32.png": (32, 32),
+    "app-icon-32-1x.png": (32, 32),
+    "app-icon-64.png": (64, 64),
+    "app-icon-128.png": (128, 128),
+    "app-icon-256.png": (256, 256),
+    "app-icon-256-1x.png": (256, 256),
+    "app-icon-512.png": (512, 512),
+    "app-icon-512-1x.png": (512, 512),
+    "app-icon-1024.png": (1024, 1024),
+}
 
 
 def test_committed_static_site_is_review_ready() -> None:
     errors = validate_site(REPO_ROOT / "web")
 
     assert errors == []
+
+
+def test_brand_svg_assets_are_committed_with_metadata() -> None:
+    asset_root = REPO_ROOT / "web" / "assets"
+
+    for asset_name in BRAND_SVG_ASSETS:
+        asset_path = asset_root / asset_name
+
+        assert asset_path.is_file()
+
+        root = ElementTree.fromstring(asset_path.read_text(encoding="utf-8"))
+        title = root.find(f"{SVG_NAMESPACE}title")
+        desc = root.find(f"{SVG_NAMESPACE}desc")
+
+        assert title is not None
+        assert title.text
+        assert desc is not None
+        assert desc.text
+
+
+def test_macos_app_icon_catalog_has_rendered_slots() -> None:
+    icon_root = (
+        REPO_ROOT
+        / "app"
+        / "Shorty"
+        / "Sources"
+        / "Shorty"
+        / "Resources"
+        / "Assets.xcassets"
+        / "AppIcon.appiconset"
+    )
+    contents = json.loads((icon_root / "Contents.json").read_text(encoding="utf-8"))
+    filenames = {
+        image["filename"] for image in contents["images"] if "filename" in image
+    }
+
+    assert filenames == set(APP_ICON_SIZES)
+    for filename, expected_size in APP_ICON_SIZES.items():
+        assert png_size(icon_root / filename) == expected_size
 
 
 def test_static_site_validator_rejects_placeholder_and_missing_contact(
@@ -93,3 +157,10 @@ def test_static_site_package_contains_relative_site_files(tmp_path: Path) -> Non
             assert member.uid == 0
             assert member.gid == 0
             assert member.mtime == 0
+
+
+def png_size(path: Path) -> tuple[int, int]:
+    header = path.read_bytes()[:24]
+
+    assert header[:8] == b"\x89PNG\r\n\x1a\n"
+    return struct.unpack(">II", header[16:24])

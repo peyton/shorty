@@ -5,9 +5,13 @@ let signingTeam = Environment.teamId.getString(default: "3VDQ4656LX")
 let marketingVersion = "1.0.0"
 let buildNumber = "1"
 
-func targetSettings() -> Settings {
+func targetSettings(includeAppAssets: Bool = false) -> Settings {
     var base = SettingsDictionary()
         .automaticCodeSigning(devTeam: signingTeam)
+    if includeAppAssets {
+        base["ASSETCATALOG_COMPILER_APPICON_NAME"] = .string("AppIcon")
+        base["ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME"] = .string("AccentColor")
+    }
     base["COMPILATION_CACHE_ENABLE_CACHING"] = .string("NO")
     base["COMPILATION_CACHE_ENABLE_PLUGIN"] = .string("NO")
     base["MARKETING_VERSION"] = .string(marketingVersion)
@@ -45,10 +49,13 @@ let project = Project(
             sources: [
                 "Sources/Shorty/**"
             ],
+            resources: [
+                "Sources/Shorty/Resources/**"
+            ],
             dependencies: [
                 .target(name: "ShortyCore")
             ],
-            settings: targetSettings()
+            settings: targetSettings(includeAppAssets: true)
         ),
         .target(
             name: "ShortyBridge",
@@ -74,6 +81,7 @@ let project = Project(
             infoPlist: .default,
             sources: [
                 "Sources/ShortyScreenshots/**",
+                "Sources/Shorty/ShortyBrand.swift",
                 "Sources/Shorty/SettingsView.swift",
                 "Sources/Shorty/StatusBarView.swift"
             ],

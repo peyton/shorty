@@ -155,7 +155,7 @@ struct SettingsContentView: View {
             }
             .tag(SettingsTab.about)
         }
-        .frame(width: 680, height: 480)
+        .frame(width: 720, height: 500)
     }
 }
 
@@ -220,12 +220,7 @@ private struct SettingsShortcutRow: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
-            Text(shortcut.defaultKeys.description)
-                .font(.system(.body, design: .monospaced))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(Color.secondary.opacity(0.15))
-                .cornerRadius(4)
+            ShortcutKeyBadge(text: shortcut.defaultKeys.description)
         }
         .padding(.vertical, 2)
     }
@@ -263,7 +258,7 @@ private struct SettingsAdaptersTab: View {
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(.caption)
-                .foregroundColor(.orange)
+                .foregroundColor(ShortyBrand.amber)
             }
         }
         .padding()
@@ -277,52 +272,51 @@ private struct AdapterGenerationPanel: View {
     let actions: SettingsActions
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Generate Adapter")
-                        .font(.headline)
-                    Text("Create a local adapter from the active app's menus, then review it before saving.")
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Generate Adapter")
+                            .font(.headline)
+                        Text("Create a local adapter from the active app's menus, then review it before saving.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Button("Generate for Active App", action: actions.generateForActiveApp)
+                }
+
+                if let message {
+                    Text(message)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                Spacer()
-                Button("Generate for Active App", action: actions.generateForActiveApp)
-            }
 
-            if let message {
-                Text(message)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+                if let preview {
+                    DisclosureGroup("Generated preview for \(preview.appName)") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(preview.mappings) { mapping in
+                                Text("\(canonicalName(for: mapping.canonicalID)): \(mappingDetail(mapping))")
+                                    .font(.caption)
+                            }
 
-            if let preview {
-                DisclosureGroup("Generated preview for \(preview.appName)") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(preview.mappings) { mapping in
-                            Text("\(canonicalName(mapping.canonicalID)): \(mappingDetail(mapping))")
-                                .font(.caption)
+                            HStack {
+                                Button("Save Adapter", action: actions.saveGeneratedAdapter)
+                                    .buttonStyle(.borderedProminent)
+
+                                Button("Discard", action: actions.discardGeneratedAdapter)
+                            }
+                            .controlSize(.small)
                         }
-
-                        HStack {
-                            Button("Save Adapter", action: actions.saveGeneratedAdapter)
-                                .buttonStyle(.borderedProminent)
-
-                            Button("Discard", action: actions.discardGeneratedAdapter)
-                        }
-                        .controlSize(.small)
+                        .padding(.top, 4)
                     }
-                    .padding(.top, 4)
+                    .font(.caption)
                 }
-                .font(.caption)
             }
         }
-        .padding(12)
-        .background(Color.secondary.opacity(0.08))
-        .cornerRadius(8)
     }
 
-    private func canonicalName(_ canonicalID: String) -> String {
+    private func canonicalName(for canonicalID: String) -> String {
         canonicalByID[canonicalID]?.name ?? canonicalID
     }
 }
@@ -356,9 +350,9 @@ private struct SettingsAdapterRow: View {
                     Text(adapter.appName)
                         .fontWeight(.medium)
                     if adapter.source != .builtin {
-                        Label("Review", systemImage: "exclamationmark.triangle")
+                        Label("Review", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundColor(.orange)
+                            .foregroundColor(ShortyBrand.amber)
                     }
                     Spacer()
                     Text("\(adapter.mappings.count) shortcuts")
@@ -388,15 +382,13 @@ private struct SettingsAboutTab: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Image(systemName: "keyboard.fill")
-                .font(.system(size: 48))
-                .foregroundColor(.accentColor)
+            ShortyMarkView(size: 64)
 
             Text("Shorty")
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("One set of keyboard shortcuts for every app.")
+            Text("A local command map for macOS shortcuts.")
                 .foregroundColor(.secondary)
 
             Divider()

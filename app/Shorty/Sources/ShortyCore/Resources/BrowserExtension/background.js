@@ -22,7 +22,7 @@ const SUPPORTED_DOMAINS = [
 ];
 
 let port = null;
-let lastSentDomain = null;
+let lastSentDomain = undefined;
 let reconnectTimer = null;
 
 function normalizeSupportedDomain(hostname) {
@@ -53,6 +53,7 @@ function scheduleReconnect() {
 function connectToHost() {
   try {
     port = chrome.runtime.connectNative(NATIVE_HOST);
+    lastSentDomain = undefined;
 
     port.onMessage.addListener(() => {});
 
@@ -77,15 +78,30 @@ function sendDomain(domain) {
   });
 }
 
+function sendClearDomain() {
+  if (!port || lastSentDomain === null) return;
+  lastSentDomain = null;
+  port.postMessage({
+    type: "domain_cleared",
+  });
+}
+
 function sendDomainFromUrl(url) {
   const domain = extractDomain(url);
   const supportedDomain = domain ? normalizeSupportedDomain(domain) : null;
-  if (supportedDomain) sendDomain(supportedDomain);
+  if (supportedDomain) {
+    sendDomain(supportedDomain);
+  } else {
+    sendClearDomain();
+  }
 }
 
 async function sendActiveTabDomain() {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
     if (tab?.url) sendDomainFromUrl(tab.url);
   } catch (e) {
     // The active tab may be unavailable while Chrome is restoring state.

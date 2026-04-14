@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Diagnostics glyph</title>
+  <desc id="desc">Three status lines with a highlighted warning signal.</desc>
+  <rect x="11" y="12" width="42" height="40" rx="10" fill="#111716" />
+  <path d="M21 25h22M21 34h14M21 43h22" stroke="#f8fbf8" stroke-linecap="round" stroke-width="4" />
+  <circle cx="44" cy="34" r="5" fill="#c18427" />
+</svg>

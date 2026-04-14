@@ -10,6 +10,7 @@ import Foundation
 public final class BrowserBridge: ObservableObject {
     public enum NativeMessage: Equatable {
         case domainChanged(String)
+        case domainCleared
     }
 
     public static let socketName = "shorty-bridge.sock"
@@ -56,8 +57,16 @@ public final class BrowserBridge: ObservableObject {
         reportAllDomains: Bool = false
     ) -> NativeMessage? {
         guard let json = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
-              let type = json["type"] as? String,
-              type == "domain_changed",
+              let type = json["type"] as? String
+        else {
+            return nil
+        }
+
+        if type == "domain_cleared" {
+            return .domainCleared
+        }
+
+        guard type == "domain_changed",
               let rawDomain = json["domain"] as? String,
               !rawDomain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
@@ -154,12 +163,13 @@ public final class BrowserBridge: ObservableObject {
     public init(
         appMonitor: AppMonitor,
         configuration: EngineConfiguration = .releaseDefault,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        socketPath: String? = nil
     ) {
         self.appMonitor = appMonitor
         self.configuration = configuration
         self.fileManager = fileManager
-        self.socketPath = Self.defaultSocketPath
+        self.socketPath = socketPath ?? Self.defaultSocketPath
     }
 
     deinit {
@@ -315,8 +325,13 @@ public final class BrowserBridge: ObservableObject {
             if let message = Self.decodeMessagePayload(
                 payload,
                 reportAllDomains: configuration.reportAllBrowserDomains
-            ), case .domainChanged(let domain) = message {
-                setDomain(domain)
+            ) {
+                switch message {
+                case .domainChanged(let domain):
+                    setDomain(domain)
+                case .domainCleared:
+                    clearDomain()
+                }
             }
 
             guard sendAck(to: fileDescriptor) else {
@@ -333,6 +348,17 @@ public final class BrowserBridge: ObservableObject {
             self.lastDomain = domain
             self.appMonitor?.webAppDomain = domain
             self.status = .connected(domain)
+        }
+    }
+
+    private func clearDomain() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lastDomain = nil
+            self.appMonitor?.webAppDomain = nil
+            if self.isListening {
+                self.status = .listening(self.socketPath)
+            }
         }
     }
 

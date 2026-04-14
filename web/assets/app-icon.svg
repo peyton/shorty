@@ -1,16 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
   <title id="title">Shorty app icon</title>
-  <desc id="desc">A compact keyboard mark with a highlighted command key.</desc>
-  <rect width="128" height="128" rx="28" fill="#111111" />
-  <rect x="20" y="35" width="88" height="58" rx="12" fill="#f7f7f2" />
-  <g fill="#111111">
-    <rect x="31" y="47" width="12" height="10" rx="3" />
-    <rect x="49" y="47" width="12" height="10" rx="3" />
-    <rect x="67" y="47" width="12" height="10" rx="3" />
-    <rect x="85" y="47" width="12" height="10" rx="3" />
-    <rect x="31" y="64" width="12" height="10" rx="3" />
-    <rect x="49" y="64" width="30" height="10" rx="3" />
-    <rect x="85" y="64" width="12" height="10" rx="3" />
+  <desc id="desc">A graphite keyboard with a teal shortcut route and amber command key.</desc>
+  <defs>
+    <linearGradient id="shell" x1="18" x2="110" y1="16" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#25302c" />
+      <stop offset="1" stop-color="#101514" />
+    </linearGradient>
+    <filter id="shadow" x="8" y="10" width="112" height="112" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="9" flood-color="#07110f" flood-opacity=".22" stdDeviation="8" />
+    </filter>
+  </defs>
+  <rect width="128" height="128" rx="29" fill="url(#shell)" />
+  <g filter="url(#shadow)">
+    <rect x="20" y="34" width="88" height="60" rx="14" fill="#f8fbf8" />
+    <rect x="29" y="45" width="13" height="11" rx="3" fill="#1b2321" />
+    <rect x="47" y="45" width="13" height="11" rx="3" fill="#1b2321" />
+    <rect x="65" y="45" width="13" height="11" rx="3" fill="#1b2321" />
+    <rect x="84" y="45" width="15" height="11" rx="3" fill="#0f766e" />
+    <rect x="29" y="63" width="13" height="11" rx="3" fill="#1b2321" />
+    <rect x="47" y="63" width="31" height="11" rx="3" fill="#1b2321" />
+    <rect x="84" y="63" width="15" height="11" rx="3" fill="#1b2321" />
+    <rect x="29" y="81" width="21" height="6" rx="3" fill="#c18427" />
+    <path d="M54 84h24c9 0 13-4 13-12v-9" fill="none" stroke="#0f766e" stroke-linecap="round" stroke-linejoin="round" stroke-width="6" />
+    <circle cx="91" cy="63" r="3" fill="#f8fbf8" />
   </g>
-  <rect x="31" y="79" width="66" height="8" rx="4" fill="#16a34a" />
 </svg>

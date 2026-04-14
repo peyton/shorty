@@ -130,9 +130,8 @@ struct StatusBarContentView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             StatusBarHeader(snapshot: snapshot)
-            Divider()
             StatusSummarySection(snapshot: snapshot)
             ActiveAppSection(snapshot: snapshot)
             PermissionSection(
@@ -152,7 +151,7 @@ struct StatusBarContentView: View {
             StatusFooter(actions: actions)
         }
         .padding()
-        .frame(width: 340)
+        .frame(width: 360)
     }
 }
 
@@ -161,18 +160,17 @@ private struct StatusBarHeader: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "keyboard.fill")
-                .font(.title2)
+            ShortyMarkView(size: 38)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Shorty")
                     .font(.headline)
-                Text("Shortcut translation")
+                Text("Command map")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
             Spacer()
             Circle()
-                .fill(snapshot.statusIsHealthy ? Color.green : Color.orange)
+                .fill(snapshot.statusIsHealthy ? ShortyBrand.teal : ShortyBrand.amber)
                 .frame(width: 9, height: 9)
                 .accessibilityLabel(snapshot.statusTitle)
         }
@@ -183,14 +181,26 @@ private struct StatusSummarySection: View {
     let snapshot: StatusBarSnapshot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(snapshot.statusTitle)
+        ShortyPanel {
+            HStack(alignment: .top, spacing: 10) {
+                Image(
+                    systemName: snapshot.statusIsHealthy
+                        ? "checkmark.circle.fill"
+                        : "exclamationmark.triangle.fill"
+                )
+                .foregroundColor(snapshot.statusIsHealthy ? ShortyBrand.teal : ShortyBrand.amber)
                 .font(.callout)
-                .fontWeight(.semibold)
-            Text(snapshot.statusDetail)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(snapshot.statusTitle)
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                    Text(snapshot.statusDetail)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 }
@@ -199,13 +209,15 @@ private struct ActiveAppSection: View {
     let snapshot: StatusBarSnapshot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            StatusInfoRow("Active app", snapshot.currentAppName)
-            StatusInfoRow("Coverage", snapshot.coverageText)
-            if let lifecycleMessage = snapshot.lifecycleMessage {
-                Label(lifecycleMessage, systemImage: "arrow.clockwise")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 8) {
+                StatusInfoRow("Active app", snapshot.currentAppName)
+                StatusInfoRow("Coverage", snapshot.coverageText)
+                if let lifecycleMessage = snapshot.lifecycleMessage {
+                    Label(lifecycleMessage, systemImage: "arrow.clockwise")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
     }
@@ -218,23 +230,25 @@ private struct PermissionSection: View {
 
     var body: some View {
         if snapshot.requiresPermission {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Button("Open Accessibility Settings", action: actions.openAccessibilitySettings)
-                        .buttonStyle(.borderedProminent)
+            ShortyPanel {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Button("Open Accessibility Settings", action: actions.openAccessibilitySettings)
+                            .buttonStyle(.borderedProminent)
 
-                    Button("Check Again", action: actions.checkAgain)
-                }
-                .controlSize(.small)
+                        Button("Check Again", action: actions.checkAgain)
+                    }
+                    .controlSize(.small)
 
-                DisclosureGroup("What Shorty needs", isExpanded: $showsPermissionHelp) {
-                    Text("Shorty uses macOS Accessibility permission to listen for your shortcut keys and translate them only for supported apps. It does not need a network service for native app shortcuts.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
+                    DisclosureGroup("What Shorty needs", isExpanded: $showsPermissionHelp) {
+                        Text("Shorty uses macOS Accessibility permission to listen for your shortcut keys and translate them only for supported apps. It does not need a network service for native app shortcuts.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
+                    }
+                    .font(.caption)
                 }
-                .font(.caption)
             }
         }
     }
@@ -245,16 +259,18 @@ private struct StatusControlsSection: View {
     let eventTapEnabled: Binding<Bool>
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle("Shorty enabled", isOn: eventTapEnabled)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .disabled(snapshot.requiresPermission)
+        ShortyPanel {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Shorty enabled", isOn: eventTapEnabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(snapshot.requiresPermission)
 
-            if !eventTapEnabled.wrappedValue {
-                Text("Shorty is passing every shortcut through unchanged.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if !eventTapEnabled.wrappedValue {
+                    Text("Shorty is passing every shortcut through unchanged.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
     }
@@ -265,31 +281,33 @@ private struct AdvancedDiagnosticsSection: View {
     @Binding var showsAdvancedDiagnostics: Bool
 
     var body: some View {
-        DisclosureGroup("Advanced Diagnostics", isExpanded: $showsAdvancedDiagnostics) {
-            VStack(alignment: .leading, spacing: 8) {
-                StatusInfoRow("Effective ID", snapshot.effectiveID)
-                StatusInfoRow("Adapter source", snapshot.adapterSource)
-                StatusInfoRow("Mappings", snapshot.mappingCount)
-                StatusInfoRow("Web domain", snapshot.webDomain)
-                StatusInfoRow("Bridge", snapshot.bridgeStatus)
-                StatusInfoRow("Intercepted", "\(snapshot.eventsIntercepted)")
-                StatusInfoRow("Remapped", "\(snapshot.eventsRemapped)")
+        ShortyPanel {
+            DisclosureGroup("Advanced Diagnostics", isExpanded: $showsAdvancedDiagnostics) {
+                VStack(alignment: .leading, spacing: 8) {
+                    StatusInfoRow("Effective ID", snapshot.effectiveID)
+                    StatusInfoRow("Adapter source", snapshot.adapterSource)
+                    StatusInfoRow("Mappings", snapshot.mappingCount)
+                    StatusInfoRow("Web domain", snapshot.webDomain)
+                    StatusInfoRow("Bridge", snapshot.bridgeStatus)
+                    StatusInfoRow("Intercepted", "\(snapshot.eventsIntercepted)")
+                    StatusInfoRow("Remapped", "\(snapshot.eventsRemapped)")
 
-                if !snapshot.validationMessages.isEmpty {
-                    Text("Adapter validation warnings")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                    ForEach(snapshot.validationMessages, id: \.self) { message in
-                        Text(message)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
+                    if !snapshot.validationMessages.isEmpty {
+                        Text("Adapter validation warnings")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        ForEach(snapshot.validationMessages, id: \.self) { message in
+                            Text(message)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                        }
                     }
                 }
+                .padding(.top, 6)
             }
-            .padding(.top, 6)
+            .font(.caption)
         }
-        .font(.caption)
     }
 }
 
@@ -323,6 +341,7 @@ private struct StatusInfoRow: View {
             Spacer()
             Text(value)
                 .fontWeight(.medium)
+                .foregroundColor(.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
