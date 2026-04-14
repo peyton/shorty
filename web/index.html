@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shorty for macOS</title>
+    <meta
+      name="description"
+      content="Shorty is a small macOS app that helps you find and use keyboard shortcuts from the menu bar."
+    />
+    <link rel="stylesheet" href="/assets/site.css" />
+    <link rel="icon" href="/assets/app-icon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <div class="site-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Shorty home">
+          <img src="/assets/app-icon.svg" alt="" width="32" height="32" />
+          <span>Shorty</span>
+        </a>
+        <nav class="nav" aria-label="Main navigation">
+          <a href="/support/">Support</a>
+          <a href="/privacy/">Privacy</a>
+          <a href="https://github.com/peyton/shorty">Source</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="hero-title">
+          <div>
+            <p class="eyebrow">macOS menu bar shortcuts</p>
+            <h1 id="hero-title">Find the shortcut you meant to press.</h1>
+            <p class="lede">
+              Shorty watches the front app, reads its menus, and keeps useful
+              keyboard commands close without taking over your workspace.
+            </p>
+            <div class="actions">
+              <a class="button" href="https://github.com/peyton/shorty"
+                >Build from source</a
+              >
+              <a class="button secondary" href="/support/">Get support</a>
+            </div>
+          </div>
+          <div class="hero-art" aria-hidden="true">
+            <img
+              class="app-mark"
+              src="/assets/app-icon.svg"
+              alt=""
+              width="340"
+              height="340"
+            />
+          </div>
+        </section>
+
+        <section class="section alt" aria-labelledby="flow-title">
+          <div class="section-inner">
+            <h2 id="flow-title">A quiet way back to the keyboard.</h2>
+            <p class="section-copy">
+              Search actions by name, confirm the shortcut, and keep your hands
+              moving. Shorty stays small so the app you are using remains the
+              focus.
+            </p>
+            <div class="steps">
+              <article class="step">
+                <strong>Read the active menus</strong>
+                <p>
+                  Shorty uses macOS accessibility access to inspect menu items
+                  in the app you are already using.
+                </p>
+              </article>
+              <article class="step">
+                <strong>Match the command</strong>
+                <p>
+                  Type part of an action name and Shorty narrows the menu tree
+                  to likely matches.
+                </p>
+              </article>
+              <article class="step">
+                <strong>Press with confidence</strong>
+                <p>
+                  See the key combo before you leave the menu bar or use it as a
+                  quick reminder.
+                </p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="shortcuts-title">
+          <div class="section-inner split">
+            <div>
+              <h2 id="shortcuts-title">
+                Built for the shortcuts already there.
+              </h2>
+              <p class="section-copy">
+                Shorty does not ask apps to change. It works with standard macOS
+                menus and the keyboard shortcuts apps publish there.
+              </p>
+            </div>
+            <div class="shortcut-stack" aria-label="Example shortcut list">
+              <div class="shortcut-row">
+                <span>Open Recent</span>
+                <span class="key">Shift Command O</span>
+              </div>
+              <div class="shortcut-row">
+                <span>Show Inspector</span>
+                <span class="key">Option Command I</span>
+              </div>
+              <div class="shortcut-row">
+                <span>Close Tab</span>
+                <span class="key">Command W</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section alt" aria-labelledby="contact-title">
+          <div class="section-inner">
+            <h2 id="contact-title">Need help?</h2>
+            <p class="section-copy">
+              Email <a href="mailto:shorty@peyton.app">shorty@peyton.app</a>
+              with the macOS version, app name, and the shortcut you expected to
+              find.
+            </p>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>
+          Shorty is maintained by Peyton Randolph. Contact
+          <a href="mailto:shorty@peyton.app">shorty@peyton.app</a>.
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>

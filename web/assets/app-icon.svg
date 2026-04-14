@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Shorty app icon</title>
+  <desc id="desc">A compact keyboard mark with a highlighted command key.</desc>
+  <rect width="128" height="128" rx="28" fill="#111111" />
+  <rect x="20" y="35" width="88" height="58" rx="12" fill="#f7f7f2" />
+  <g fill="#111111">
+    <rect x="31" y="47" width="12" height="10" rx="3" />
+    <rect x="49" y="47" width="12" height="10" rx="3" />
+    <rect x="67" y="47" width="12" height="10" rx="3" />
+    <rect x="85" y="47" width="12" height="10" rx="3" />
+    <rect x="31" y="64" width="12" height="10" rx="3" />
+    <rect x="49" y="64" width="30" height="10" rx="3" />
+    <rect x="85" y="64" width="12" height="10" rx="3" />
+  </g>
+  <rect x="31" y="79" width="66" height="8" rx="4" fill="#16a34a" />
+</svg>

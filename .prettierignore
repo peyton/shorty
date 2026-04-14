@@ -1,0 +1,10 @@
+.build
+.cache
+.config
+.git
+.mise
+.state
+.venv
+.DerivedData
+app/Shorty.xcworkspace
+app/Tuist/Dependencies

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shorty Privacy</title>
+    <meta
+      name="description"
+      content="Shorty privacy notes for menu inspection, local processing, and support contact."
+    />
+    <link rel="stylesheet" href="/assets/site.css" />
+    <link rel="icon" href="/assets/app-icon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Shorty home">
+        <img src="/assets/app-icon.svg" alt="" width="32" height="32" />
+        <span>Shorty</span>
+      </a>
+      <nav class="nav" aria-label="Main navigation">
+        <a href="/">Home</a>
+        <a href="/support/">Support</a>
+        <a href="https://github.com/peyton/shorty">Source</a>
+      </nav>
+    </header>
+
+    <main class="body-page">
+      <p class="eyebrow">Privacy</p>
+      <h1>Shorty privacy</h1>
+      <p class="lede">
+        Shorty is designed for local shortcut lookup. Questions can be sent to
+        <a href="mailto:shorty@peyton.app">shorty@peyton.app</a>.
+      </p>
+
+      <section aria-labelledby="local-title">
+        <h2 id="local-title">Local processing</h2>
+        <p>
+          Shorty reads menu item names and keyboard shortcut metadata exposed by
+          the active macOS app. The lookup work happens on the Mac.
+        </p>
+      </section>
+
+      <section aria-labelledby="access-title">
+        <h2 id="access-title">Accessibility access</h2>
+        <p>
+          macOS accessibility permission is used to inspect application menus.
+          You can remove that access in System Settings at any time.
+        </p>
+      </section>
+
+      <section aria-labelledby="support-title">
+        <h2 id="support-title">Support email</h2>
+        <p>
+          Support messages sent to
+          <a href="mailto:shorty@peyton.app">shorty@peyton.app</a> are used to
+          answer the request and diagnose the reported issue.
+        </p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Contact <a href="mailto:shorty@peyton.app">shorty@peyton.app</a>.</p>
+    </footer>
+  </body>
+</html>

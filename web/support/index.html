@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shorty Support</title>
+    <meta
+      name="description"
+      content="Get support for Shorty, including accessibility access, browser bridge setup, and contact details."
+    />
+    <link rel="stylesheet" href="/assets/site.css" />
+    <link rel="icon" href="/assets/app-icon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Shorty home">
+        <img src="/assets/app-icon.svg" alt="" width="32" height="32" />
+        <span>Shorty</span>
+      </a>
+      <nav class="nav" aria-label="Main navigation">
+        <a href="/">Home</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="https://github.com/peyton/shorty">Source</a>
+      </nav>
+    </header>
+
+    <main class="body-page">
+      <p class="eyebrow">Support</p>
+      <h1>Shorty support</h1>
+      <p class="lede">
+        Email <a href="mailto:shorty@peyton.app">shorty@peyton.app</a> with the
+        macOS version, app name, and the command or shortcut that did not match.
+      </p>
+
+      <section aria-labelledby="setup-title">
+        <h2 id="setup-title">Setup checks</h2>
+        <div class="support-list">
+          <article class="support-item">
+            <strong>Accessibility access</strong>
+            <p>
+              Shorty needs macOS accessibility access so it can read menu items
+              in the active app. Open System Settings, Privacy & Security,
+              Accessibility, then allow Shorty.
+            </p>
+          </article>
+          <article class="support-item">
+            <strong>Menu permissions</strong>
+            <p>
+              If an app does not expose menu item shortcuts through macOS,
+              Shorty may not be able to list every command.
+            </p>
+          </article>
+          <article class="support-item">
+            <strong>Browser bridge</strong>
+            <p>
+              Browser integrations rely on the native messaging bridge included
+              with the app source.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section aria-labelledby="source-title">
+        <h2 id="source-title">Source</h2>
+        <p>
+          The project source is available at
+          <a href="https://github.com/peyton/shorty">github.com/peyton/shorty</a
+          >. Build and validation commands are documented in the repository.
+        </p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Contact <a href="mailto:shorty@peyton.app">shorty@peyton.app</a>.</p>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,127 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - name: Repair git checkout for act
+        if: ${{ env.ACT }}
+        run: bash scripts/tooling/repair_act_git_checkout.sh
+      - name: Install tools for act
+        if: ${{ env.ACT }}
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          cache: false
+          cache_save: false
+      - name: Install tools
+        if: ${{ !env.ACT }}
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          cache: true
+      - name: Run lint shard
+        run: mise exec -- just ci-lint
+
+  python:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - name: Repair git checkout for act
+        if: ${{ env.ACT }}
+        run: bash scripts/tooling/repair_act_git_checkout.sh
+      - name: Install tools for act
+        if: ${{ env.ACT }}
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          cache: false
+          cache_save: false
+      - name: Install tools
+        if: ${{ !env.ACT }}
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          cache: true
+      - name: Run Python shard
+        run: mise exec -- just ci-python
+
+  app-test:
+    name: macOS App Tests
+    runs-on: macos-latest
+    needs: lint
+    steps:
+      - if: ${{ !env.ACT }}
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - name: Repair git checkout for act
+        if: ${{ env.ACT }}
+        run: bash scripts/tooling/repair_act_git_checkout.sh
+      - name: Install tools for act
+        if: ${{ env.ACT }}
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          cache: false
+          cache_save: false
+      - name: Install tools
+        if: ${{ !env.ACT }}
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          cache: true
+      - name: Generate project
+        run: mise exec -- just generate
+      - name: Run app tests
+        run: mise exec -- just test-app
+
+  app-build:
+    name: macOS App Build
+    runs-on: macos-latest
+    needs: lint
+    steps:
+      - if: ${{ !env.ACT }}
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - name: Repair git checkout for act
+        if: ${{ env.ACT }}
+        run: bash scripts/tooling/repair_act_git_checkout.sh
+      - name: Install tools for act
+        if: ${{ env.ACT }}
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          cache: false
+          cache_save: false
+      - name: Install tools
+        if: ${{ !env.ACT }}
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          cache: true
+      - name: Generate project
+        run: mise exec -- just generate
+      - name: Run app build shard
+        run: mise exec -- just ci-build

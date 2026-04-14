@@ -1,0 +1,17 @@
+[global]
+disable = ["MD013", "MD033"]
+exclude = [
+  ".git",
+  ".github",
+  ".venv",
+  ".mise",
+  ".build",
+  ".cache",
+  ".config",
+  ".state",
+  "app/Shorty.xcworkspace",
+]
+respect-gitignore = true
+
+[MD004]
+style = "consistent"

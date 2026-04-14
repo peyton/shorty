@@ -1,0 +1,7 @@
+{
+  "name": "com.shorty.browser_bridge",
+  "description": "Shorty native messaging host — reports web app domains for context-aware shortcuts.",
+  "path": "/usr/local/bin/shorty-bridge",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://EXTENSION_ID_PLACEHOLDER/"]
+}

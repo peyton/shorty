@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Shorty – Web App Bridge",
+  "version": "1.0.0",
+  "description": "Reports the current web app domain to Shorty for context-aware keyboard shortcuts.",
+  "permissions": ["activeTab", "nativeMessaging", "tabs"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

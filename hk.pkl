@@ -1,0 +1,52 @@
+/// Shorty tooling checks.
+/// Root wrappers choose which steps run so local and CI behavior stays explicit.
+amends "package://github.com/jdx/hk/releases/download/v1.40.0/hk@1.40.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v1.40.0/hk@1.40.0#/Builtins.pkl"
+
+local toolSteps = new Mapping<String, Step> {
+  ["markdown"] = (Builtins.rumdl) {}
+  ["pkl"] = Builtins.pkl
+  ["pkl-format"] = (Builtins.pkl_format) {
+    depends = "pkl"
+  }
+  ["shellcheck"] = Builtins.shellcheck
+  ["shfmt"] = Builtins.shfmt
+  ["actionlint"] = Builtins.actionlint
+  ["zizmor"] = (Builtins.zizmor) {
+    check_diff =
+      "tool_path=\"$(mise which zizmor)\" && env -u GITHUB_TOKEN -u GH_TOKEN -u ZIZMOR_GITHUB_TOKEN \"$tool_path\" --no-progress {{ files }}"
+    fix =
+      "tool_path=\"$(mise which zizmor)\" && env -u GITHUB_TOKEN -u GH_TOKEN -u ZIZMOR_GITHUB_TOKEN \"$tool_path\" --no-progress --fix {{ files }}"
+  }
+  ["prettier"] = (Builtins.prettier) {
+    dir = "."
+    batch = true
+  }
+  ["ruff"] = (Builtins.ruff) {
+    batch = true
+  }
+  ["ruff_format"] = (Builtins.ruff_format) {
+    depends = "ruff"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stash = "git"
+    steps {
+      ...toolSteps
+    }
+  }
+  ["check"] {
+    steps {
+      ...toolSteps
+    }
+  }
+  ["fix"] {
+    fix = true
+    steps {
+      ...toolSteps
+    }
+  }
+}

@@ -1,4 +1,3 @@
-.venv-eval/
 .venv/
 __pycache__/
 .pytest_cache/
@@ -6,25 +5,23 @@ __pycache__/
 .config/
 .state/
 .build/
-data/raw/
-data/processed/cache/
+.DerivedData/
+.ruff_cache/
+.rumdl_cache/
 
 # Local logs
 *.log
-
-# Local Cloudflare secrets
-infra/cloudflare/.env
 
 # Local Codex state
 .codex/environments/
 .codex/config.toml
 
 # Xcode local/build artifacts
-.DerivedData/
 *.xcactivitylog
 *.xcuserstate
-app/Sunclub.xcodeproj/xcuserdata/
-app/Sunclub.xcworkspace/
+app/Shorty.xcworkspace/
+app/**/*.xcodeproj/
+app/**/Derived/
 app/Tuist/Dependencies/
 app/build/
 
@@ -36,9 +33,6 @@ app/build/
 
 # mise
 .mise/
-!/bin
-/bin/*
-!/bin/mise
 
-# rumdl
-.rumdl_cache/
+# Node
+node_modules/

@@ -1,0 +1,21 @@
+[tools]
+just = "1.49.0"
+tuist = { version = "4.180.0", os = ["macos"] }
+hk = "latest"
+actionlint = "latest"
+python = "3.14"
+uv = "latest"
+node = "24"
+"npm:prettier" = "latest"
+ruff = "latest"
+ripgrep = "latest"
+shellcheck = "latest"
+rumdl = "latest"
+shfmt = "latest"
+zizmor = "latest"
+swiftlint = "0.63.2"
+pkl = "latest"
+
+[settings]
+experimental = true
+lockfile = true
