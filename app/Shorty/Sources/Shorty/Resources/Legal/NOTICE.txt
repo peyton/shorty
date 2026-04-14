@@ -1,0 +1,19 @@
+Shorty
+Copyright (C) 2026 Peyton Randolph
+
+Shorty is free software licensed under the GNU Affero General Public License,
+version 3 or later. The SPDX license identifier is AGPL-3.0-or-later.
+
+This program is distributed WITHOUT ANY WARRANTY, including without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+LICENSE.txt for the complete license terms.
+
+Source code, release archives, and matching source archives are published at:
+
+https://github.com/peyton/shorty
+
+Direct-download releases should include both a macOS app archive and a matching
+source archive named shorty-<version>-source.tar.gz with a .sha256 checksum.
+
+Support contact: shorty@peyton.app
+Security contact: shorty@peyton.app

@@ -56,7 +56,10 @@ public final class ShortcutEngine: ObservableObject {
         self.isFirstRunComplete = userDefaults.bool(
             forKey: Self.firstRunCompleteDefaultsKey
         )
+        let marketingVersion = Self.bundleMarketingVersion()
         self.updateStatus = UpdateStatus(
+            currentVersion: Self.bundleVersionString(marketingVersion: marketingVersion),
+            sourceURL: Self.sourceURL(forVersion: marketingVersion),
             automaticChecksEnabled: userDefaults.bool(
                 forKey: Self.updateChecksEnabledDefaultsKey
             )
@@ -215,6 +218,8 @@ public final class ShortcutEngine: ObservableObject {
         updateStatus = UpdateStatus(
             state: isEnabled ? .idle : .notConfigured,
             lastCheckedAt: updateStatus.lastCheckedAt,
+            currentVersion: updateStatus.currentVersion,
+            sourceURL: updateStatus.sourceURL,
             automaticChecksEnabled: isEnabled,
             detail: isEnabled
                 ? "Shorty will use the direct-download update feed when Sparkle is bundled."
@@ -230,6 +235,8 @@ public final class ShortcutEngine: ObservableObject {
         updateStatus = UpdateStatus(
             state: state,
             lastCheckedAt: checkedAt,
+            currentVersion: updateStatus.currentVersion,
+            sourceURL: updateStatus.sourceURL,
             automaticChecksEnabled: updateStatus.automaticChecksEnabled,
             detail: detail
         )
@@ -430,6 +437,27 @@ public final class ShortcutEngine: ObservableObject {
         return AXIsProcessTrustedWithOptions(
             [promptKey: false] as CFDictionary
         )
+    }
+
+    private static func bundleMarketingVersion() -> String {
+        let info = Bundle.main.infoDictionary
+        return info?["CFBundleShortVersionString"] as? String ?? "Unknown"
+    }
+
+    private static func bundleVersionString(marketingVersion: String) -> String {
+        let info = Bundle.main.infoDictionary
+        let build = info?["CFBundleVersion"] as? String
+        guard let build, !build.isEmpty, build != "Unknown" else {
+            return marketingVersion
+        }
+        return "\(marketingVersion) (\(build))"
+    }
+
+    private static func sourceURL(forVersion version: String) -> URL? {
+        guard !version.isEmpty, version != "Unknown" else {
+            return UpdateStatus.defaultSourceURL
+        }
+        return URL(string: "https://github.com/peyton/shorty/releases/tag/v\(version)")
     }
 
     public static func requestAccessibilityPermission() {

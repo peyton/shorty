@@ -69,6 +69,28 @@ final class ReleaseModelsTests: XCTestCase {
         XCTAssertTrue(json.contains(#""web:figma.com""#))
     }
 
+    func testUpdateStatusEncodesOpenSourceMetadata() throws {
+        let sourceURL = try XCTUnwrap(
+            URL(string: "https://github.com/peyton/shorty/releases/tag/v1.0.0")
+        )
+        let status = UpdateStatus(
+            state: .idle,
+            lastCheckedAt: Date(timeIntervalSince1970: 20),
+            currentVersion: "1.0.0 (1)",
+            sourceURL: sourceURL,
+            automaticChecksEnabled: true,
+            detail: "Updates are ready."
+        )
+
+        let data = try JSONEncoder().encode(status)
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertEqual(status.currentVersion, "1.0.0 (1)")
+        XCTAssertEqual(status.sourceURL, sourceURL)
+        XCTAssertTrue(json.contains(#""currentVersion":"1.0.0 (1)""#))
+        XCTAssertTrue(json.contains(#""sourceURL":"https:\/\/github.com\/peyton\/shorty\/releases\/tag\/v1.0.0""#))
+    }
+
     func testShortcutEngineDiagnosticSnapshotIncludesBrowserSource() {
         let suiteName = "ShortyTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

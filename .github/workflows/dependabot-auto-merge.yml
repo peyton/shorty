@@ -1,0 +1,44 @@
+---
+name: Dependabot Auto Merge
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+jobs:
+  dependabot-auto-merge:
+    name: Dependabot security auto-merge
+    runs-on: ubuntu-latest
+    # pull_request_target gives the workflow a write-capable token for enabling
+    # auto-merge; this job never checks out or runs pull request code.
+    if: >-
+      ${{
+        github.event.pull_request.user.login == 'dependabot[bot]' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Dependabot scheduled version updates are disabled in dependabot.yml, so
+      # same-repo Dependabot PRs are security updates.
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@ffa630c65fa7e0ecfa0625b5ceda64399aea1b36 # v3.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for patch and minor security updates
+        if: >-
+          ${{
+            contains(
+              fromJSON('["version-update:semver-patch", "version-update:semver-minor"]'),
+              steps.metadata.outputs.update-type
+            )
+          }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"

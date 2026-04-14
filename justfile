@@ -40,6 +40,10 @@ app-package VERSION='local' ARTIFACT_LABEL='':
     version="{{VERSION}}"; version="${version#VERSION=}"; artifact_label="{{ARTIFACT_LABEL}}"; artifact_label="${artifact_label#ARTIFACT_LABEL=}"; if [ -n "$artifact_label" ]; then bash scripts/tooling/app_package.sh --version "$version" --artifact-label "$artifact_label"; else bash scripts/tooling/app_package.sh --version "$version"; fi
 
 [group('release')]
+source-package VERSION='local':
+    version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/source_package.sh --version "$version"
+
+[group('release')]
 app-notarize VERSION='local':
     version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/app_notarize.sh --version "$version"
 

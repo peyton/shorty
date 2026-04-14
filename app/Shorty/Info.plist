@@ -27,7 +27,7 @@
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Shorty may inspect app menus to map your shortcuts to the active app.</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2026 Peyton Randolph.</string>
+	<string>Copyright © 2026 Peyton Randolph. AGPL-3.0-or-later.</string>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 </dict>

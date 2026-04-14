@@ -9,6 +9,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.tooling.legal_resources import (
+    LegalResourceError,
+    validate_bundled_legal_resources,
+    validate_root_legal_resources,
+)
 from scripts.tooling.package_app import (
     DEFAULT_APP_PATH,
     REPO_ROOT,
@@ -131,6 +136,8 @@ def run_preflight(
             "Release preflight requires a clean git working tree."
         )
 
+    validate_root_legal_resources(repo_root)
+
     project_version = project_marketing_version()
     if project_version != normalized_version:
         raise ReleasePreflightError(
@@ -144,6 +151,7 @@ def run_preflight(
             f"Requested version {normalized_version} does not match built app "
             f"version {app_version}."
         )
+    validate_bundled_legal_resources(app_path)
 
     check_xcode_is_stable(
         xcode_version_text(),
@@ -171,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         result = run_preflight(version=args.version, app_path=Path(args.app_path))
-    except (ReleasePreflightError, AppPackageError) as error:
+    except (ReleasePreflightError, AppPackageError, LegalResourceError) as error:
         print(f"ERROR: {error}")
         return 2
 

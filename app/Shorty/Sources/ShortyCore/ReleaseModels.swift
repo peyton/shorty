@@ -402,6 +402,8 @@ public struct ReleaseVerificationResult: Codable, Equatable {
 }
 
 public struct UpdateStatus: Codable, Equatable {
+    public static let defaultSourceURL = URL(string: "https://github.com/peyton/shorty")
+
     public enum State: String, Codable {
         case notConfigured
         case idle
@@ -413,17 +415,23 @@ public struct UpdateStatus: Codable, Equatable {
 
     public let state: State
     public let lastCheckedAt: Date?
+    public let currentVersion: String
+    public let sourceURL: URL?
     public let automaticChecksEnabled: Bool
     public let detail: String
 
     public init(
         state: State = .notConfigured,
         lastCheckedAt: Date? = nil,
+        currentVersion: String = "Unknown",
+        sourceURL: URL? = Self.defaultSourceURL,
         automaticChecksEnabled: Bool = false,
         detail: String = "Direct-download updates are not configured in this build."
     ) {
         self.state = state
         self.lastCheckedAt = lastCheckedAt
+        self.currentVersion = currentVersion
+        self.sourceURL = sourceURL
         self.automaticChecksEnabled = automaticChecksEnabled
         self.detail = detail
     }

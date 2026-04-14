@@ -7,11 +7,16 @@ import hashlib
 import plistlib
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.tooling.legal_resources import (
+    LegalResourceError,
+    validate_bundled_legal_resources,
+)
 from scripts.tooling.package_app import (
     DEFAULT_OUTPUT_DIR,
     AppPackageError,
@@ -33,6 +38,8 @@ class ReleaseVerificationResult:
     version: str
     archive_path: Path
     digest: str
+    source_archive_path: Path | None
+    source_digest: str | None
     extracted_app_path: Path
 
 
@@ -57,6 +64,27 @@ def verify_checksum(archive_path: Path, checksum_path: Path) -> str:
         raise ReleaseVerificationError(
             f"Checksum mismatch for {archive_path.name}: expected "
             f"{expected_digest}, got {digest}"
+        )
+    return digest
+
+
+def verify_source_archive(
+    version: str,
+    source_archive_path: Path,
+    source_checksum_path: Path,
+) -> str:
+    digest = verify_checksum(source_archive_path, source_checksum_path)
+    expected_files = {
+        f"shorty-{version}/LICENSE",
+        f"shorty-{version}/NOTICE",
+        f"shorty-{version}/THIRD_PARTY_NOTICES.md",
+    }
+    with tarfile.open(source_archive_path, "r:gz") as archive:
+        names = set(archive.getnames())
+    missing = sorted(expected_files.difference(names))
+    if missing:
+        raise ReleaseVerificationError(
+            "Source archive is missing required legal files: " + ", ".join(missing)
         )
     return digest
 
@@ -115,6 +143,9 @@ def verify_release(
     archive_path: Path,
     checksum_path: Path,
     artifact_label: str | None = None,
+    source_archive_path: Path | None = None,
+    source_checksum_path: Path | None = None,
+    require_source_archive: bool = True,
     require_codesign: bool = False,
     require_gatekeeper: bool = False,
     require_staple: bool = False,
@@ -122,6 +153,20 @@ def verify_release(
     normalized_version = validate_package_version(version)
     validate_package_label(artifact_label or normalized_version, normalized_version)
     digest = verify_checksum(archive_path, checksum_path)
+    source_digest = None
+
+    if require_source_archive:
+        source_archive_path = source_archive_path or (
+            DEFAULT_OUTPUT_DIR / f"shorty-{normalized_version}-source.tar.gz"
+        )
+        source_checksum_path = source_checksum_path or source_archive_path.with_name(
+            f"{source_archive_path.name}.sha256"
+        )
+        source_digest = verify_source_archive(
+            normalized_version,
+            source_archive_path,
+            source_checksum_path,
+        )
 
     temp_dir = Path(tempfile.mkdtemp(prefix="shorty-release-verify-"))
     try:
@@ -138,6 +183,8 @@ def verify_release(
                 f"Expected app version {normalized_version}, found {bundle_version}."
             )
 
+        validate_bundled_legal_resources(app_path)
+
         verify_safari_extension(
             app_path=app_path,
             require_codesign=require_codesign,
@@ -152,6 +199,8 @@ def verify_release(
             version=normalized_version,
             archive_path=archive_path,
             digest=digest,
+            source_archive_path=source_archive_path,
+            source_digest=source_digest,
             extracted_app_path=app_path,
         )
     except Exception:
@@ -174,6 +223,18 @@ def main(argv: list[str] | None = None) -> int:
         "--checksum-path",
         help="Checksum path. Defaults to ARCHIVE.sha256.",
     )
+    parser.add_argument(
+        "--source-archive-path",
+        help=(
+            "Source archive path. Defaults to "
+            ".build/releases/shorty-VERSION-source.tar.gz."
+        ),
+    )
+    parser.add_argument(
+        "--source-checksum-path",
+        help="Source checksum path. Defaults to SOURCE_ARCHIVE.sha256.",
+    )
+    parser.add_argument("--skip-source-archive", action="store_true")
     parser.add_argument("--require-codesign", action="store_true")
     parser.add_argument("--require-gatekeeper", action="store_true")
     parser.add_argument("--require-staple", action="store_true")
@@ -192,11 +253,24 @@ def main(argv: list[str] | None = None) -> int:
             if args.checksum_path
             else (archive_path.with_name(f"{archive_path.name}.sha256"))
         )
+        source_archive_path = (
+            Path(args.source_archive_path)
+            if args.source_archive_path
+            else (DEFAULT_OUTPUT_DIR / f"shorty-{version}-source.tar.gz")
+        )
+        source_checksum_path = (
+            Path(args.source_checksum_path)
+            if args.source_checksum_path
+            else source_archive_path.with_name(f"{source_archive_path.name}.sha256")
+        )
         result = verify_release(
             version=version,
             archive_path=archive_path,
             checksum_path=checksum_path,
             artifact_label=artifact_label,
+            source_archive_path=source_archive_path,
+            source_checksum_path=source_checksum_path,
+            require_source_archive=not args.skip_source_archive,
             require_codesign=args.require_codesign,
             require_gatekeeper=args.require_gatekeeper,
             require_staple=args.require_staple,
@@ -204,8 +278,10 @@ def main(argv: list[str] | None = None) -> int:
     except (
         AppPackageError,
         ReleaseVerificationError,
+        LegalResourceError,
         SafariExtensionVerificationError,
         subprocess.CalledProcessError,
+        tarfile.TarError,
         zipfile.BadZipFile,
     ) as error:
         print(f"ERROR: {error}")
@@ -213,6 +289,9 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Release verified: {result.archive_path}")
     print(f"SHA256: {result.digest}")
+    if result.source_archive_path and result.source_digest:
+        print(f"Source verified: {result.source_archive_path}")
+        print(f"Source SHA256: {result.source_digest}")
     return 0
 
 
