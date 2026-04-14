@@ -314,11 +314,20 @@ struct StatusBarContentView: View {
         _showsDetails = State(initialValue: showsDetails)
     }
 
+    var contentPresentation: StatusBarContentPresentation {
+        StatusBarContentPresentation(snapshot: snapshot)
+    }
+
     var body: some View {
+        let presentation = contentPresentation
+
         VStack(alignment: .leading, spacing: 14) {
             StatusHeader(snapshot: snapshot)
             PermissionBanner(snapshot: snapshot, actions: actions)
-            AvailableShortcutsSection(snapshot: snapshot, actions: actions)
+            AvailableShortcutsSection(
+                presentation: presentation.shortcuts,
+                actions: actions
+            )
             TranslationControlSection(
                 snapshot: snapshot,
                 eventTapEnabled: eventTapEnabled
@@ -329,6 +338,18 @@ struct StatusBarContentView: View {
         .padding(16)
         .frame(width: 430)
         .accessibilityIdentifier("status-popover")
+    }
+}
+
+struct StatusBarContentPresentation: Equatable {
+    let statusTitle: String
+    let activeContextTitle: String
+    let shortcuts: StatusBarShortcutsPresentation
+
+    init(snapshot: StatusBarSnapshot) {
+        self.statusTitle = snapshot.status.title
+        self.activeContextTitle = snapshot.activeContextTitle
+        self.shortcuts = StatusBarShortcutsPresentation(snapshot: snapshot)
     }
 }
 
@@ -451,8 +472,83 @@ private struct PermissionBanner: View {
     }
 }
 
+struct StatusBarShortcutsPresentation: Equatable {
+    let title: String
+    let coverageDetail: String
+    let rows: [ShortcutRowPresentation]
+    let emptyState: EmptyShortcutStatePresentation?
+    let showsPauseActions: Bool
+    let showsResumeAction: Bool
+    let adapterGenerationMessage: String?
+    let hasGeneratedAdapterPreview: Bool
+
+    init(snapshot: StatusBarSnapshot) {
+        self.title = "Available now"
+        self.coverageDetail = snapshot.availability.coverageDetail
+        self.adapterGenerationMessage = snapshot.adapterGenerationMessage
+        self.hasGeneratedAdapterPreview = snapshot.hasGeneratedAdapterPreview
+
+        switch snapshot.availability.state {
+        case .available:
+            self.rows = snapshot.availability.shortcuts.map(ShortcutRowPresentation.init)
+            self.emptyState = nil
+            self.showsPauseActions = true
+            self.showsResumeAction = false
+        case .paused:
+            self.rows = []
+            self.emptyState = EmptyShortcutStatePresentation(
+                title: "Paused for this app",
+                detail: "Shorty is passing keys through for this app.",
+                showsAddButton: false
+            )
+            self.showsPauseActions = false
+            self.showsResumeAction = true
+        case .noActiveApp:
+            self.rows = []
+            self.emptyState = EmptyShortcutStatePresentation(
+                title: "No app selected",
+                detail: "Click into an app and Shorty will show its shortcuts here.",
+                showsAddButton: false
+            )
+            self.showsPauseActions = false
+            self.showsResumeAction = false
+        case .noAdapter:
+            self.rows = []
+            self.emptyState = EmptyShortcutStatePresentation(
+                title: "No shortcuts for this app yet",
+                detail: "Shorty will pass keys through until you add support for this app.",
+                showsAddButton: !snapshot.requiresPermission
+            )
+            self.showsPauseActions = false
+            self.showsResumeAction = false
+        }
+    }
+}
+
+struct ShortcutRowPresentation: Equatable, Identifiable {
+    let id: String
+    let name: String
+    let defaultKeys: String
+    let actionDescription: String
+    let actionKind: AvailableShortcutActionKind
+
+    init(shortcut: AvailableShortcut) {
+        self.id = shortcut.id
+        self.name = shortcut.name
+        self.defaultKeys = shortcut.defaultKeys.displayString
+        self.actionDescription = shortcut.actionDescription
+        self.actionKind = shortcut.actionKind
+    }
+}
+
+struct EmptyShortcutStatePresentation: Equatable {
+    let title: String
+    let detail: String
+    let showsAddButton: Bool
+}
+
 private struct AvailableShortcutsSection: View {
-    let snapshot: StatusBarSnapshot
+    let presentation: StatusBarShortcutsPresentation
     let actions: StatusBarActions
 
     var body: some View {
@@ -460,9 +556,9 @@ private struct AvailableShortcutsSection: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Available now")
+                        Text(presentation.title)
                             .font(.callout.weight(.semibold))
-                        Text(snapshot.availability.coverageDetail)
+                        Text(presentation.coverageDetail)
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -470,43 +566,31 @@ private struct AvailableShortcutsSection: View {
                     Spacer()
                 }
 
-                switch snapshot.availability.state {
-                case .available:
-                    ShortcutList(shortcuts: snapshot.availability.shortcuts)
+                if !presentation.rows.isEmpty {
+                    ShortcutList(shortcuts: presentation.rows)
+                }
+
+                if presentation.showsPauseActions {
                     HStack(spacing: 8) {
                         Button("Pause This App", action: actions.pauseCurrentApp)
                         Button("Pause 15 Min", action: actions.pauseFor15Minutes)
                     }
                     .controlSize(.small)
-                case .paused:
-                    EmptyShortcutState(
-                        title: "Paused for this app",
-                        detail: "Shorty is passing keys through for this app.",
-                        showsAddButton: false,
-                        actions: actions
-                    )
-                    Button("Resume This App", action: actions.resumeCurrentApp)
-                        .controlSize(.small)
-                case .noActiveApp:
-                    EmptyShortcutState(
-                        title: "No app selected",
-                        detail: "Click into an app and Shorty will show its shortcuts here.",
-                        showsAddButton: false,
-                        actions: actions
-                    )
-                case .noAdapter:
-                    EmptyShortcutState(
-                        title: "No shortcuts for this app yet",
-                        detail: "Shorty will pass keys through until you add support for this app.",
-                        showsAddButton: !snapshot.requiresPermission,
-                        actions: actions
-                    )
                 }
 
-                if let message = snapshot.adapterGenerationMessage {
+                if let emptyState = presentation.emptyState {
+                    EmptyShortcutState(presentation: emptyState, actions: actions)
+                }
+
+                if presentation.showsResumeAction {
+                    Button("Resume This App", action: actions.resumeCurrentApp)
+                        .controlSize(.small)
+                }
+
+                if let message = presentation.adapterGenerationMessage {
                     AdapterGenerationMessage(
                         message: message,
-                        hasPreview: snapshot.hasGeneratedAdapterPreview
+                        hasPreview: presentation.hasGeneratedAdapterPreview
                     )
                 }
             }
@@ -515,7 +599,7 @@ private struct AvailableShortcutsSection: View {
 }
 
 private struct ShortcutList: View {
-    let shortcuts: [AvailableShortcut]
+    let shortcuts: [ShortcutRowPresentation]
 
     var body: some View {
         ScrollView {
@@ -531,11 +615,11 @@ private struct ShortcutList: View {
 }
 
 private struct AvailableShortcutRow: View {
-    let shortcut: AvailableShortcut
+    let shortcut: ShortcutRowPresentation
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            ShortcutKeyBadge(text: shortcut.defaultKeys.displayString)
+            ShortcutKeyBadge(text: shortcut.defaultKeys)
                 .frame(minWidth: 58, alignment: .trailing)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -555,7 +639,7 @@ private struct AvailableShortcutRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(shortcut.name), \(shortcut.defaultKeys.displayString), \(shortcut.actionDescription)"
+            "\(shortcut.name), \(shortcut.defaultKeys), \(shortcut.actionDescription)"
         )
     }
 }
@@ -575,22 +659,20 @@ private struct ShortcutActionPill: View {
 }
 
 private struct EmptyShortcutState: View {
-    let title: String
-    let detail: String
-    let showsAddButton: Bool
+    let presentation: EmptyShortcutStatePresentation
     let actions: StatusBarActions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: "keyboard.badge.ellipsis")
+            Label(presentation.title, systemImage: "keyboard.badge.ellipsis")
                 .font(.caption.weight(.semibold))
                 .foregroundColor(.secondary)
-            Text(detail)
+            Text(presentation.detail)
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if showsAddButton {
+            if presentation.showsAddButton {
                 Button("Add Current App", action: actions.addCurrentApp)
                     .controlSize(.small)
             }

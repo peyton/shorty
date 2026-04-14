@@ -1,4 +1,3 @@
-import AppKit
 import ShortyCore
 import SwiftUI
 import XCTest
@@ -51,46 +50,60 @@ final class StatusBarPopoverTests: XCTestCase {
         XCTAssertEqual(store.snapshot.availability.state, .available)
     }
 
-    func testStatusBarContentRendersAvailableShortcutsWithoutInteraction() {
+    func testStatusBarContentPresentsAvailableShortcutsWithoutInteraction() {
         let snapshot = makeSnapshot(
             appID: "com.apple.Safari",
             appName: "Safari"
         )
 
-        let rendered = render(
-            StatusBarContentView(
-                snapshot: snapshot,
-                eventTapEnabled: .constant(true)
-            )
+        let view = StatusBarContentView(
+            snapshot: snapshot,
+            eventTapEnabled: .constant(true)
         )
-        let text = rendered.accessibilityText()
+        let presentation = view.contentPresentation
 
-        XCTAssertContains(text, "Safari")
-        XCTAssertContains(text, "Available now")
-        XCTAssertContains(text, "13 available")
-        XCTAssertContains(text, "Focus URL / Address Bar")
-        XCTAssertContains(text, "Go Back")
-        XCTAssertFalse(text.contains("No shortcuts for this app yet"), text)
+        XCTAssertEqual(presentation.activeContextTitle, "Safari")
+        XCTAssertEqual(presentation.shortcuts.title, "Available now")
+        XCTAssertContains(presentation.shortcuts.coverageDetail, "For Safari")
+        XCTAssertEqual(presentation.shortcuts.rows.count, 13)
+        XCTAssertTrue(presentation.shortcuts.rows.contains {
+            $0.name == "Focus URL / Address Bar"
+        })
+        XCTAssertTrue(presentation.shortcuts.rows.contains { $0.name == "Go Back" })
+        XCTAssertNil(presentation.shortcuts.emptyState)
+        XCTAssertTrue(presentation.shortcuts.showsPauseActions)
+        XCTAssertFalse(presentation.shortcuts.showsResumeAction)
     }
 
-    func testStatusBarContentRendersNoAdapterRecoveryAction() {
+    func testStatusBarContentPresentsNoAdapterRecoveryAction() {
         let snapshot = makeSnapshot(
             appID: "com.example.notes",
             appName: "Acme Notes"
         )
 
-        let rendered = render(
-            StatusBarContentView(
-                snapshot: snapshot,
-                eventTapEnabled: .constant(true)
-            )
+        let view = StatusBarContentView(
+            snapshot: snapshot,
+            eventTapEnabled: .constant(true)
         )
-        let text = rendered.accessibilityText()
+        let presentation = view.contentPresentation
 
-        XCTAssertContains(text, "Acme Notes")
-        XCTAssertContains(text, "No shortcuts for this app yet")
-        XCTAssertContains(text, "Add Current App")
-        XCTAssertFalse(text.contains("Focus URL / Address Bar"), text)
+        XCTAssertEqual(presentation.activeContextTitle, "Acme Notes")
+        XCTAssertContains(
+            presentation.shortcuts.coverageDetail,
+            "Shorty does not have shortcuts for Acme Notes yet."
+        )
+        XCTAssertTrue(presentation.shortcuts.rows.isEmpty)
+        XCTAssertEqual(
+            presentation.shortcuts.emptyState?.title,
+            "No shortcuts for this app yet"
+        )
+        XCTAssertEqual(
+            presentation.shortcuts.emptyState?.detail,
+            "Shorty will pass keys through until you add support for this app."
+        )
+        XCTAssertEqual(presentation.shortcuts.emptyState?.showsAddButton, true)
+        XCTAssertFalse(presentation.shortcuts.showsPauseActions)
+        XCTAssertFalse(presentation.shortcuts.showsResumeAction)
     }
 
     private func makeEngine() -> ShortcutEngine {
@@ -158,32 +171,6 @@ final class StatusBarPopoverTests: XCTestCase {
             .appendingPathComponent("ShortyPopoverTests-\(UUID().uuidString)")
     }
 
-    private func render<Content: View>(
-        _ content: Content,
-        size: CGSize = CGSize(width: 430, height: 640)
-    ) -> RenderedView {
-        let hostingView = NSHostingView(
-            rootView: content
-                .frame(width: size.width, height: size.height)
-                .environment(\.colorScheme, .light)
-        )
-        hostingView.frame = CGRect(origin: .zero, size: size)
-        hostingView.wantsLayer = true
-
-        let window = NSWindow(
-            contentRect: CGRect(origin: .zero, size: size),
-            styleMask: .borderless,
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = hostingView
-        window.layoutIfNeeded()
-        hostingView.layoutSubtreeIfNeeded()
-        hostingView.displayIfNeeded()
-
-        return RenderedView(window: window, rootView: hostingView)
-    }
-
     private func waitFor(
         _ condition: @escaping () -> Bool,
         timeout: TimeInterval = 2
@@ -209,100 +196,10 @@ final class StatusBarPopoverTests: XCTestCase {
     ) {
         XCTAssertTrue(
             text.contains(expected),
-            "Expected rendered accessibility text to contain '\(expected)'. Text: \(text)",
+            "Expected text to contain '\(expected)'. Text: \(text)",
             file: file,
             line: line
         )
-    }
-}
-
-private final class RenderedView {
-    let window: NSWindow
-    let rootView: NSView
-
-    init(window: NSWindow, rootView: NSView) {
-        self.window = window
-        self.rootView = rootView
-    }
-
-    func accessibilityText() -> String {
-        var visited = Set<ObjectIdentifier>()
-        return collectAccessibilityText(from: rootView, visited: &visited)
-            .joined(separator: "\n")
-    }
-
-    private func collectAccessibilityText(
-        from element: Any,
-        visited: inout Set<ObjectIdentifier>
-    ) -> [String] {
-        guard let object = element as? NSObject else { return [] }
-        let identifier = ObjectIdentifier(object)
-        guard visited.insert(identifier).inserted else { return [] }
-
-        var result: [String] = []
-
-        if let view = object as? NSView {
-            result.append(
-                contentsOf: accessibilityText(
-                    label: view.accessibilityLabel(),
-                    title: view.accessibilityTitle(),
-                    value: view.accessibilityValue(),
-                    identifier: view.accessibilityIdentifier()
-                )
-            )
-            for child in view.accessibilityChildren() ?? [] {
-                result.append(
-                    contentsOf: collectAccessibilityText(
-                        from: child,
-                        visited: &visited
-                    )
-                )
-            }
-            for subview in view.subviews {
-                result.append(
-                    contentsOf: collectAccessibilityText(
-                        from: subview,
-                        visited: &visited
-                    )
-                )
-            }
-        } else if let element = object as? NSAccessibilityElement {
-            result.append(
-                contentsOf: accessibilityText(
-                    label: element.accessibilityLabel(),
-                    title: element.accessibilityTitle(),
-                    value: element.accessibilityValue(),
-                    identifier: element.accessibilityIdentifier()
-                )
-            )
-            for child in element.accessibilityChildren() ?? [] {
-                result.append(
-                    contentsOf: collectAccessibilityText(
-                        from: child,
-                        visited: &visited
-                    )
-                )
-            }
-        }
-
-        return result
-    }
-
-    private func accessibilityText(
-        label: String?,
-        title: String?,
-        value: Any?,
-        identifier: String?
-    ) -> [String] {
-        [
-            label,
-            title,
-            value as? String,
-            identifier
-        ].compactMap { text in
-            guard let text, !text.isEmpty else { return nil }
-            return text
-        }
     }
 }
 
