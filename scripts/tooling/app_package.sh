@@ -40,13 +40,40 @@ if [ ! -d "$app_path" ]; then
 fi
 
 identity="${SHORTY_CODESIGN_IDENTITY:--}"
+app_entitlements="$REPO_ROOT/app/Shorty/Shorty.entitlements"
+extension_entitlements="$REPO_ROOT/app/Shorty/ShortySafariWebExtension.entitlements"
+
+signing_args=(--force --sign "$identity")
 if [ "$identity" = "-" ]; then
   printf 'Signing %s with ad-hoc identity for local packaging.\n' "$app_path"
-  codesign --force --deep --sign - "$app_path"
 else
   printf 'Signing %s with identity %s.\n' "$app_path" "$identity"
-  codesign --force --deep --options runtime --timestamp --sign "$identity" "$app_path"
+  signing_args+=(--options runtime --timestamp)
 fi
+
+sign_path() {
+  local path="$1"
+  shift
+  codesign "${signing_args[@]}" "$@" "$path"
+}
+
+if [ -d "$app_path/Contents/Frameworks" ]; then
+  while IFS= read -r -d '' framework_path; do
+    sign_path "$framework_path"
+  done < <(find "$app_path/Contents/Frameworks" -maxdepth 1 -name '*.framework' -print0)
+
+  while IFS= read -r -d '' dylib_path; do
+    sign_path "$dylib_path"
+  done < <(find "$app_path/Contents/Frameworks" -maxdepth 1 -name '*.dylib' -print0)
+fi
+
+if [ -d "$app_path/Contents/PlugIns" ]; then
+  while IFS= read -r -d '' extension_path; do
+    sign_path "$extension_path" --entitlements "$extension_entitlements"
+  done < <(find "$app_path/Contents/PlugIns" -maxdepth 1 -name '*.appex' -print0)
+fi
+
+sign_path "$app_path" --entitlements "$app_entitlements"
 
 codesign --verify --deep --strict --verbose=2 "$app_path"
 

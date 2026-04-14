@@ -4,14 +4,26 @@ import SwiftUI
 
 final class ShortyAppDelegate: NSObject, NSApplicationDelegate {
     let engine = ShortcutEngine()
+    private var didOpenFirstRunSettings = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         engine.start()
+        openFirstRunSettingsIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         engine.stop()
+    }
+
+    private func openFirstRunSettingsIfNeeded() {
+        guard !didOpenFirstRunSettings, !engine.isFirstRunComplete else { return }
+        didOpenFirstRunSettings = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 }
 
@@ -39,6 +51,9 @@ private struct StatusIconView: View {
     @ObservedObject var engine: ShortcutEngine
 
     var body: some View {
-        ShortyMenuBarGlyph(status: engine.status)
+        Image(systemName: "keyboard")
+            .imageScale(.medium)
+            .accessibilityLabel(engine.status.title)
+            .help(engine.status.title)
     }
 }

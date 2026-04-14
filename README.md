@@ -119,7 +119,7 @@ Release:
 - `just source-package VERSION=1.0.0` - create the matching source archive and checksum for AGPL distribution.
 - `just app-package VERSION=1.0.0` - build, sign, zip, and checksum the app under `.build/releases/`.
 - `just app-package VERSION=1.0.0 ARTIFACT_LABEL=preview-<sha>` - build a preview archive whose bundled app still reports SemVer `1.0.0`.
-- `just app-notarize VERSION=1.0.0` - submit the app archive to Apple notarization, staple the app, and repackage it.
+- `just app-notarize VERSION=1.0.0` - submit the app archive to Apple notarization, staple the app, and repackage it. Pass `ARTIFACT_LABEL=preview-<sha>` for preview-labeled archives.
 - `just dmg-package VERSION=1.0.0` - create a DMG with `Shorty.app` and an Applications shortcut.
 - `just safari-extension-verify` - verify the built app contains the Safari Web Extension bundle and manifest.
 - `just release-verify VERSION=1.0.0` - verify the zip, checksum, bundle version, and Safari extension contents.
@@ -183,6 +183,8 @@ the primary public AGPL release path.
 ## Release Notes
 
 Direct-download app archives are created under `.build/releases/` as `shorty-<version>-macos.zip` with a matching `.sha256` file. Public `just release` lanes require Developer ID signing, Apple notarization credentials, stapling, and strict verification; local `just app-package` builds can still use ad-hoc signing for development. Preview releases use non-SemVer labels such as `preview-abcdef012345` for GitHub tags and archive names while the app bundle continues to report the root `VERSION` SemVer.
+
+GitHub does not provide Apple code signing automatically. The preview release workflow runs in the `preview-release` GitHub Environment and expects environment secrets for a Developer ID certificate and Team App Store Connect API key notarization: `SHORTY_DEVELOPER_ID_CERTIFICATE_BASE64`, `SHORTY_DEVELOPER_ID_CERTIFICATE_PASSWORD`, `SHORTY_CI_KEYCHAIN_PASSWORD`, `SHORTY_CODESIGN_IDENTITY`, `SHORTY_APP_STORE_CONNECT_KEY_BASE64`, `SHORTY_APP_STORE_CONNECT_KEY_ID`, and `SHORTY_APP_STORE_CONNECT_ISSUER_ID`. The App Store Connect key must be a Team key, not an Individual key, because `notarytool` uses issuer-based Team API key authentication for this workflow. Without those Apple Developer Program credentials, GitHub cannot produce a preview build that behaves like an end-user macOS download for Accessibility permission, Gatekeeper, or notarization.
 
 The sandboxed App Store candidate keeps TestFlight metadata separate from preview labels. `CFBundleShortVersionString` must match the root `VERSION` value, and `CFBundleVersion` must be a positive numeric build number that increases for each App Store Connect upload. To use the upload lane, set `SHORTY_APP_STORE_CONNECT_KEY_PATH`, `SHORTY_APP_STORE_CONNECT_KEY_ID`, and `SHORTY_APP_STORE_CONNECT_ISSUER_ID`. To archive with already-installed local signing assets instead, set `SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING=1`.
 

@@ -60,6 +60,9 @@ private final class SettingsSnapshotStore: ObservableObject {
         observe(engine.$safariExtensionStatus) { [weak self] _ in
             self?.scheduleRefresh()
         }
+        observe(engine.$launchAtLoginStatus) { [weak self] _ in
+            self?.scheduleRefresh()
+        }
         observe(engine.$isFirstRunComplete) { [weak self] _ in
             self?.scheduleRefresh()
         }
@@ -182,6 +185,7 @@ struct SettingsSnapshot {
     let accessibilityStatus: String
     let browserBridgeStatus: String
     let safariExtensionStatus: SafariExtensionStatus
+    let launchAtLoginStatus: LaunchAtLoginStatus
     let updateStatus: UpdateStatus
     let firstRunComplete: Bool
     let diagnostics: RuntimeDiagnosticSnapshot
@@ -207,6 +211,7 @@ struct SettingsSnapshot {
             accessibilityStatus: ShortcutEngine.hasAccessibilityPermission ? "Granted" : "Not granted",
             browserBridgeStatus: engine.browserBridge?.status.title ?? "Unavailable",
             safariExtensionStatus: engine.safariExtensionStatus,
+            launchAtLoginStatus: engine.launchAtLoginStatus,
             updateStatus: engine.updateStatus,
             firstRunComplete: engine.isFirstRunComplete,
             diagnostics: diagnostics
@@ -220,6 +225,7 @@ struct SettingsActions {
     let discardGeneratedAdapter: () -> Void
     let markFirstRunComplete: () -> Void
     let resetFirstRun: () -> Void
+    let setLaunchAtLogin: (Bool) -> Void
     let setAutomaticUpdates: (Bool) -> Void
     let checkForUpdates: () -> Void
     let openSafariExtensionSettings: () -> Void
@@ -231,6 +237,7 @@ struct SettingsActions {
         discardGeneratedAdapter: {},
         markFirstRunComplete: {},
         resetFirstRun: {},
+        setLaunchAtLogin: { _ in },
         setAutomaticUpdates: { _ in },
         checkForUpdates: {},
         openSafariExtensionSettings: {},
@@ -244,6 +251,7 @@ struct SettingsActions {
             discardGeneratedAdapter: { engine.discardGeneratedAdapterPreview() },
             markFirstRunComplete: { engine.markFirstRunComplete() },
             resetFirstRun: { engine.resetFirstRunState() },
+            setLaunchAtLogin: { engine.setLaunchAtLoginEnabled($0) },
             setAutomaticUpdates: { engine.setAutomaticUpdateChecksEnabled($0) },
             checkForUpdates: {
                 engine.recordUpdateCheckResult(
@@ -409,6 +417,11 @@ struct SettingsContentView: View {
             .tag(SettingsTab.about)
         }
         .frame(minWidth: 760, idealWidth: 820, minHeight: 540, idealHeight: 620)
+        .onAppear {
+            if !snapshot.firstRunComplete {
+                selectedTab = .setup
+            }
+        }
     }
 }
 
@@ -429,6 +442,10 @@ private struct SettingsSetupTab: View {
                             title: "Accessibility",
                             detail: "Required for shortcut translation and menu adapter generation.",
                             isComplete: snapshot.accessibilityStatus == "Granted"
+                        )
+                        SetupLaunchAtLoginRow(
+                            status: snapshot.launchAtLoginStatus,
+                            actions: actions
                         )
                         SetupChecklistRow(
                             title: "Safari extension",
@@ -455,6 +472,41 @@ private struct SettingsSetupTab: View {
                 }
             }
             .padding()
+        }
+    }
+}
+
+private struct SetupLaunchAtLoginRow: View {
+    let status: LaunchAtLoginStatus
+    let actions: SettingsActions
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Launch at Login")
+                        .fontWeight(.medium)
+                    Text(status.detail)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } icon: {
+                Image(systemName: status.isEnabled ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(status.isEnabled ? ShortyBrand.teal : .secondary)
+            }
+
+            Spacer()
+
+            Toggle(
+                "Launch at Login",
+                isOn: Binding(
+                    get: { status.isEnabled },
+                    set: { actions.setLaunchAtLogin($0) }
+                )
+            )
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
         }
     }
 }

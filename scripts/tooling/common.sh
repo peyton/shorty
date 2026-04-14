@@ -125,7 +125,7 @@ EOF
 }
 
 generate_workspace() {
-  run_in_app run_mise_exec tuist generate --no-open --cache-profile none
+  run_in_app run_mise_exec tuist generate --no-open --no-binary-cache --cache-profile none
 }
 
 workspace_is_generated() {
