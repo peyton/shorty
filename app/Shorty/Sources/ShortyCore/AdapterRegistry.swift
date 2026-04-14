@@ -389,7 +389,7 @@ public final class AdapterRegistry: ObservableObject {
             .replacingOccurrences(of: "/", with: "_")
     }
 
-    // MARK: - Hardcoded adapters for the top 20 apps
+    // MARK: - Built-in adapter catalog
 
     private func loadHardcodedAdapters() {
         let builtins = Self.builtinAdapters
@@ -406,333 +406,388 @@ public final class AdapterRegistry: ObservableObject {
         }
     }
 
-    static let builtinAdapters: [Adapter] = [
-        // VS Code: Cmd+L → Cmd+G (go to line), but for URL bar intent we map to Cmd+P (quick open)
-        Adapter(
-            appIdentifier: "com.microsoft.VSCode",
-            appName: "Visual Studio Code",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x23, modifiers: .command)), // Cmd+P (quick open)
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x23, modifiers: [.command, .shift])), // Cmd+Shift+P
-                .init(canonicalID: "find_and_replace", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x04, modifiers: [.command, .option])), // Cmd+Option+F
-                .init(canonicalID: "newline_in_field", method: .passthrough) // Enter is already newline in editor
-            ]
-        ),
-
-        // Slack: Shift+Enter normally sends; we want it to be newline
-        Adapter(
-            appIdentifier: "com.tinyspeck.slackmacgap",
-            appName: "Slack",
-            mappings: [
-                .init(canonicalID: "newline_in_field", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x24, modifiers: [.option])), // Option+Enter = newline in Slack
-                .init(canonicalID: "find_in_page", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x03, modifiers: .command)), // Cmd+F
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x28, modifiers: .command)) // Cmd+K
-            ]
-        ),
-
-        // Discord
-        Adapter(
-            appIdentifier: "com.hnc.Discord",
-            appName: "Discord",
-            mappings: [
-                .init(canonicalID: "newline_in_field", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x24, modifiers: [.shift])), // Shift+Enter (same)
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x28, modifiers: .command)) // Cmd+K
-            ]
-        ),
-
-        // Finder
-        Adapter(
-            appIdentifier: "com.apple.finder",
-            appName: "Finder",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x25, modifiers: [.command, .shift])), // Cmd+Shift+G (Go to Folder)
-                .init(canonicalID: "find_in_page", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x03, modifiers: .command)), // Cmd+F
-                .init(canonicalID: "new_tab", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x11, modifiers: .command)) // Cmd+T
-            ]
-        ),
-
-        // Terminal
-        Adapter(
-            appIdentifier: "com.apple.Terminal",
-            appName: "Terminal",
-            mappings: [
-                .init(canonicalID: "new_tab", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x11, modifiers: .command)), // Cmd+T
-                .init(canonicalID: "find_in_page", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x03, modifiers: .command)), // Cmd+F
-                .init(canonicalID: "newline_in_field", method: .passthrough)
-            ]
-        ),
-
-        // iTerm2
-        Adapter(
-            appIdentifier: "com.googlecode.iterm2",
-            appName: "iTerm2",
-            mappings: [
-                .init(canonicalID: "new_tab", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x11, modifiers: .command)), // Cmd+T
-                .init(canonicalID: "find_in_page", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x03, modifiers: .command)), // Cmd+F
-                .init(canonicalID: "newline_in_field", method: .passthrough)
-            ]
-        ),
-
-        // Xcode
-        Adapter(
-            appIdentifier: "com.apple.dt.Xcode",
-            appName: "Xcode",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x1F, modifiers: [.command, .shift])), // Cmd+Shift+O (Open Quickly)
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x1F, modifiers: [.command, .shift])), // Cmd+Shift+O
-                .init(canonicalID: "find_and_replace", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x03, modifiers: [.command, .option])), // Cmd+Option+F
-                .init(canonicalID: "newline_in_field", method: .passthrough)
-            ]
-        ),
-
-        // Notes
-        Adapter(
-            appIdentifier: "com.apple.Notes",
-            appName: "Notes",
-            mappings: [
-                .init(canonicalID: "find_in_page", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x03, modifiers: .command)),
-                .init(canonicalID: "newline_in_field", method: .passthrough) // Enter is already newline
-            ]
-        ),
-
-        // Mail
-        Adapter(
-            appIdentifier: "com.apple.mail",
-            appName: "Mail",
-            mappings: [
-                .init(canonicalID: "find_in_page", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x03, modifiers: .command)),
-                .init(canonicalID: "submit_field", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x24, modifiers: [.command, .shift])) // Cmd+Shift+Enter = send
-            ]
-        ),
-
-        // Messages
-        Adapter(
-            appIdentifier: "com.apple.MobileSMS",
-            appName: "Messages",
-            mappings: [
-                .init(canonicalID: "newline_in_field", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x24, modifiers: [.option])) // Option+Enter for newline
-            ]
-        ),
-
-        // Notion (desktop)
-        Adapter(
-            appIdentifier: "notion.id",
-            appName: "Notion",
-            mappings: [
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x23, modifiers: .command)), // Cmd+P
-                .init(canonicalID: "find_in_page", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x03, modifiers: .command)),
-                .init(canonicalID: "newline_in_field", method: .passthrough) // Enter is newline in Notion blocks
-            ]
-        ),
-
-        // Obsidian
-        Adapter(
-            appIdentifier: "md.obsidian",
-            appName: "Obsidian",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x1F, modifiers: .command)), // Cmd+O (quick switcher)
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x23, modifiers: .command)), // Cmd+P
-                .init(canonicalID: "newline_in_field", method: .passthrough)
-            ]
-        ),
-
-        // Telegram
-        Adapter(
-            appIdentifier: "ru.keepcoder.Telegram",
-            appName: "Telegram",
-            mappings: [
-                .init(canonicalID: "newline_in_field", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x24, modifiers: [.shift])) // Shift+Enter (native)
-            ]
-        ),
-
-        // 1Password
-        Adapter(
-            appIdentifier: "com.1password.1password",
-            appName: "1Password",
-            mappings: [
-                .init(canonicalID: "find_in_page", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x03, modifiers: .command))
-            ]
-        ),
-
-        // Spotify
-        Adapter(
-            appIdentifier: "com.spotify.client",
-            appName: "Spotify",
-            mappings: [
-                .init(canonicalID: "find_in_page", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x25, modifiers: .command)), // Cmd+L (search in Spotify)
-                .init(canonicalID: "toggle_play_pause", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x31, modifiers: [])) // Space
-            ]
-        ),
-
-        // Safari — most canonical shortcuts already match Safari's native ones
-        Adapter(
-            appIdentifier: "com.apple.Safari",
-            appName: "Safari",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .passthrough), // Cmd+L is native
-                .init(canonicalID: "find_in_page", method: .passthrough),  // Cmd+F is native
-                .init(canonicalID: "new_tab", method: .passthrough),       // Cmd+T is native
-                .init(canonicalID: "close_tab", method: .passthrough)     // Cmd+W is native
-            ]
-        ),
-
-        // Chrome
-        Adapter(
-            appIdentifier: "com.google.Chrome",
-            appName: "Google Chrome",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .passthrough), // Cmd+L is native
-                .init(canonicalID: "find_in_page", method: .passthrough),
-                .init(canonicalID: "new_tab", method: .passthrough),
-                .init(canonicalID: "close_tab", method: .passthrough),
-                .init(canonicalID: "reopen_tab", method: .passthrough)
-            ]
-        ),
-
-        // Firefox
-        Adapter(
-            appIdentifier: "org.mozilla.firefox",
-            appName: "Firefox",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .passthrough),
-                .init(canonicalID: "find_in_page", method: .passthrough),
-                .init(canonicalID: "new_tab", method: .passthrough),
-                .init(canonicalID: "close_tab", method: .passthrough)
-            ]
-        ),
-
-        // Arc
-        Adapter(
-            appIdentifier: "company.thebrowser.Browser",
-            appName: "Arc",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x25, modifiers: .command)), // Cmd+L (same, but Arc may differ)
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x11, modifiers: .command)), // Cmd+T opens command bar in Arc
-                .init(canonicalID: "new_tab", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x11, modifiers: .command)) // Cmd+T
-            ]
-        ),
-
-        // Notion web
-        Adapter(
-            appIdentifier: "web:notion.so",
-            appName: "Notion Web",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .passthrough),
-                .init(canonicalID: "find_in_page", method: .passthrough),
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x23, modifiers: .command)), // Cmd+P
-                .init(canonicalID: "newline_in_field", method: .passthrough)
-            ]
-        ),
-
-        // Slack web
-        Adapter(
-            appIdentifier: "web:slack.com",
-            appName: "Slack Web",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .passthrough),
-                .init(canonicalID: "find_in_page", method: .passthrough),
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x28, modifiers: .command)), // Cmd+K
-                .init(canonicalID: "newline_in_field", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x24, modifiers: [.option]))
-            ]
-        ),
-
-        // Gmail web
-        Adapter(
-            appIdentifier: "web:mail.google.com",
-            appName: "Gmail Web",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .passthrough),
-                .init(canonicalID: "find_in_page", method: .passthrough),
-                .init(canonicalID: "submit_field", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x24, modifiers: .command)), // Cmd+Return
-                .init(canonicalID: "newline_in_field", method: .passthrough)
-            ]
-        ),
-
-        // Google Docs web
-        Adapter(
-            appIdentifier: "web:docs.google.com",
-            appName: "Google Docs Web",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .passthrough),
-                .init(canonicalID: "find_in_page", method: .passthrough),
-                .init(canonicalID: "find_and_replace", method: .passthrough),
-                .init(canonicalID: "newline_in_field", method: .passthrough)
-            ]
-        ),
-
-        // Figma web
-        Adapter(
-            appIdentifier: "web:figma.com",
-            appName: "Figma Web",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .passthrough),
-                .init(canonicalID: "find_in_page", method: .passthrough),
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x2C, modifiers: .command)) // Cmd+/
-            ]
-        ),
-
-        // Linear web
-        Adapter(
-            appIdentifier: "web:linear.app",
-            appName: "Linear Web",
-            mappings: [
-                .init(canonicalID: "focus_url_bar", method: .passthrough),
-                .init(canonicalID: "find_in_page", method: .passthrough),
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x28, modifiers: .command)) // Cmd+K
-            ]
-        ),
-
-        // Linear
-        Adapter(
-            appIdentifier: "com.linear",
-            appName: "Linear",
-            mappings: [
-                .init(canonicalID: "command_palette", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x28, modifiers: .command)), // Cmd+K
-                .init(canonicalID: "find_in_page", method: .keyRemap,
-                      nativeKeys: KeyCombo(keyCode: 0x03, modifiers: .command))
-            ]
-        )
+    static let commonBrowserMappings: [Adapter.Mapping] = [
+        passthrough("focus_url_bar"),
+        passthrough("go_back"),
+        passthrough("go_forward"),
+        passthrough("select_all"),
+        passthrough("find_in_page"),
+        passthrough("new_tab"),
+        passthrough("close_tab"),
+        passthrough("next_tab"),
+        passthrough("prev_tab"),
+        passthrough("reopen_tab"),
+        passthrough("new_window"),
+        passthrough("close_window"),
+        passthrough("minimize_window")
     ]
+
+    static let commonDocumentMappings: [Adapter.Mapping] = [
+        passthrough("select_all"),
+        passthrough("find_in_page"),
+        passthrough("newline_in_field"),
+        passthrough("new_window"),
+        passthrough("close_window"),
+        passthrough("minimize_window")
+    ]
+
+    static let commonChatMappings: [Adapter.Mapping] = [
+        passthrough("submit_field"),
+        passthrough("newline_in_field"),
+        passthrough("find_in_page"),
+        remap("command_palette", to: "cmd+k"),
+        passthrough("spotlight_search"),
+        passthrough("new_window"),
+        passthrough("close_window"),
+        passthrough("minimize_window")
+    ]
+
+    static let commonTerminalMappings: [Adapter.Mapping] = [
+        passthrough("newline_in_field"),
+        passthrough("find_in_page"),
+        passthrough("new_tab"),
+        passthrough("close_tab"),
+        passthrough("new_window"),
+        passthrough("close_window"),
+        passthrough("minimize_window")
+    ]
+
+    static let commonCodeEditorMappings: [Adapter.Mapping] = [
+        remap("focus_url_bar", to: "cmd+p"),
+        remap("spotlight_search", to: "cmd+p"),
+        remap("command_palette", to: "cmd+shift+p"),
+        passthrough("select_all"),
+        passthrough("find_in_page"),
+        remap("find_and_replace", to: "cmd+option+f"),
+        passthrough("newline_in_field"),
+        passthrough("new_tab"),
+        passthrough("close_tab"),
+        passthrough("new_window"),
+        passthrough("close_window"),
+        passthrough("minimize_window")
+    ]
+
+    static let commonMediaMappings: [Adapter.Mapping] = [
+        passthrough("toggle_play_pause"),
+        passthrough("find_in_page"),
+        passthrough("new_window"),
+        passthrough("close_window"),
+        passthrough("minimize_window")
+    ]
+
+    static let builtinAdapters: [Adapter] = [
+        adapter("com.apple.Safari", "Safari", commonBrowserMappings),
+        adapter("com.google.Chrome", "Google Chrome", commonBrowserMappings),
+        adapter("com.google.Chrome.canary", "Google Chrome Canary", commonBrowserMappings),
+        adapter("org.chromium.Chromium", "Chromium", commonBrowserMappings),
+        adapter("com.brave.Browser", "Brave Browser", commonBrowserMappings),
+        adapter("com.microsoft.edgemac", "Microsoft Edge", commonBrowserMappings),
+        adapter("com.vivaldi.Vivaldi", "Vivaldi", commonBrowserMappings),
+        adapter("org.mozilla.firefox", "Firefox", commonBrowserMappings),
+        adapter(
+            "company.thebrowser.Browser",
+            "Arc",
+            mappings(
+                commonBrowserMappings,
+                [remap("command_palette", to: "cmd+t")]
+            )
+        ),
+        adapter(
+            "com.openai.atlas",
+            "ChatGPT Atlas",
+            mappings(commonBrowserMappings, [passthrough("spotlight_search")])
+        ),
+
+        adapter("com.microsoft.VSCode", "Visual Studio Code", commonCodeEditorMappings),
+        adapter(
+            "com.microsoft.VSCodeInsiders",
+            "Visual Studio Code - Insiders",
+            commonCodeEditorMappings
+        ),
+        adapter("dev.zed.Zed", "Zed", commonCodeEditorMappings),
+        adapter("dev.zed.Zed-Preview", "Zed Preview", commonCodeEditorMappings),
+        adapter("com.google.antigravity", "Antigravity", commonCodeEditorMappings),
+        adapter(
+            "com.apple.dt.Xcode",
+            "Xcode",
+            mappings(
+                commonCodeEditorMappings,
+                [
+                    remap("focus_url_bar", to: "cmd+shift+o"),
+                    remap("spotlight_search", to: "cmd+shift+o"),
+                    remap("command_palette", to: "cmd+shift+o")
+                ]
+            )
+        ),
+
+        adapter("com.apple.Terminal", "Terminal", commonTerminalMappings),
+        adapter("com.googlecode.iterm2", "iTerm2", commonTerminalMappings),
+        adapter("com.mitchellh.ghostty", "Ghostty", commonTerminalMappings),
+        adapter("com.termius.mac", "Termius", commonTerminalMappings),
+        adapter("com.termius-beta.mac", "Termius Beta", commonTerminalMappings),
+
+        adapter(
+            "com.apple.finder",
+            "Finder",
+            mappings(
+                commonDocumentMappings,
+                [
+                    remap("focus_url_bar", to: "cmd+shift+g"),
+                    passthrough("new_tab")
+                ]
+            )
+        ),
+        adapter(
+            "com.apple.TextEdit",
+            "TextEdit",
+            mappings(commonDocumentMappings, [remap("find_and_replace", to: "cmd+option+f")])
+        ),
+        adapter("com.apple.Notes", "Notes", commonDocumentMappings),
+        adapter(
+            "com.apple.mail",
+            "Mail",
+            mappings(commonDocumentMappings, [remap("submit_field", to: "cmd+shift+return")])
+        ),
+        adapter(
+            "com.apple.MobileSMS",
+            "Messages",
+            mappings(commonChatMappings, [remap("newline_in_field", to: "option+return")])
+        ),
+        adapter("com.apple.Preview", "Preview", commonDocumentMappings),
+        adapter("com.apple.iCal", "Calendar", commonDocumentMappings),
+        adapter(
+            "com.apple.Maps",
+            "Maps",
+            mappings(commonDocumentMappings, [remap("focus_url_bar", to: "cmd+f")])
+        ),
+        adapter("com.apple.FaceTime", "FaceTime", commonDocumentMappings),
+        adapter(
+            "com.apple.AddressBook",
+            "Contacts",
+            mappings(commonDocumentMappings, [remap("focus_url_bar", to: "cmd+f")])
+        ),
+        adapter("com.apple.mobilephone", "Phone", commonChatMappings),
+        adapter("com.apple.weather", "Weather", commonDocumentMappings),
+        adapter("com.apple.AppStore", "App Store", commonDocumentMappings),
+        adapter("com.apple.ActivityMonitor", "Activity Monitor", commonDocumentMappings),
+        adapter("com.apple.Music", "Music", commonMediaMappings),
+        adapter("com.apple.podcasts", "Podcasts", commonMediaMappings),
+
+        adapter("com.openai.chat", "ChatGPT", commonChatMappings),
+        adapter("com.openai.codex", "Codex", commonChatMappings),
+        adapter("com.anthropic.claudefordesktop", "Claude", commonChatMappings),
+        adapter("com.electron.ollama", "Ollama", commonChatMappings),
+        adapter("org.whispersystems.signal-desktop", "Signal", commonChatMappings),
+        adapter("net.whatsapp.WhatsApp", "WhatsApp", commonChatMappings),
+        adapter("us.zoom.xos", "Zoom", commonDocumentMappings),
+        adapter(
+            "com.tinyspeck.slackmacgap",
+            "Slack",
+            mappings(commonChatMappings, [remap("newline_in_field", to: "option+return")])
+        ),
+        adapter("com.hnc.Discord", "Discord", commonChatMappings),
+        adapter("ru.keepcoder.Telegram", "Telegram", commonChatMappings),
+
+        adapter(
+            "notion.id",
+            "Notion",
+            mappings(
+                commonDocumentMappings,
+                [
+                    remap("command_palette", to: "cmd+p"),
+                    remap("spotlight_search", to: "cmd+p")
+                ]
+            )
+        ),
+        adapter("notion.mail.id", "Notion Mail", commonChatMappings),
+        adapter("com.cron.electron", "Notion Calendar", commonDocumentMappings),
+        adapter(
+            "md.obsidian",
+            "Obsidian",
+            mappings(
+                commonDocumentMappings,
+                [
+                    remap("focus_url_bar", to: "cmd+o"),
+                    remap("command_palette", to: "cmd+p"),
+                    remap("spotlight_search", to: "cmd+o")
+                ]
+            )
+        ),
+        adapter("com.iconfactory.Tot", "Tot", commonDocumentMappings),
+        adapter(
+            "com.raycast.macos",
+            "Raycast",
+            mappings(
+                commonDocumentMappings,
+                [
+                    remap("command_palette", to: "cmd+k"),
+                    passthrough("spotlight_search")
+                ]
+            )
+        ),
+        adapter("com.culturedcode.ThingsMac", "Things 3", commonDocumentMappings),
+        adapter("com.omnigroup.OmniFocus4", "OmniFocus", commonDocumentMappings),
+        adapter("com.ngocluu.goodlinks", "GoodLinks", commonDocumentMappings),
+        adapter("com.lukilabs.lukiapp", "Craft", commonDocumentMappings),
+        adapter("com.zettlr.app", "Zettlr", commonDocumentMappings),
+        adapter("org.zotero.zotero", "Zotero", commonDocumentMappings),
+        adapter("org.zotero.zotero-beta", "Zotero", commonDocumentMappings),
+        adapter("com.github.GitHubClient", "GitHub Desktop", commonDocumentMappings),
+        adapter("io.httpie.desktop", "HTTPie", commonDocumentMappings),
+        adapter(
+            "com.1password.1password",
+            "1Password",
+            mappings(commonDocumentMappings, [passthrough("spotlight_search")])
+        ),
+        adapter(
+            "com.figma.Desktop",
+            "Figma",
+            mappings(
+                commonDocumentMappings,
+                [
+                    remap("command_palette", to: "cmd+/"),
+                    remap("spotlight_search", to: "cmd+/")
+                ]
+            )
+        ),
+        adapter("com.tldraw.desktop", "tldraw", commonDocumentMappings),
+        adapter(
+            "com.spotify.client",
+            "Spotify",
+            mappings(commonMediaMappings, [remap("find_in_page", to: "cmd+l")])
+        ),
+
+        adapter("com.microsoft.Word", "Microsoft Word", commonDocumentMappings),
+        adapter("com.microsoft.Excel", "Microsoft Excel", commonDocumentMappings),
+        adapter("com.microsoft.Powerpoint", "Microsoft PowerPoint", commonDocumentMappings),
+        adapter("com.apple.iWork.Pages", "Pages", commonDocumentMappings),
+        adapter("com.apple.iWork.Numbers", "Numbers", commonDocumentMappings),
+        adapter("com.apple.iWork.Keynote", "Keynote", commonDocumentMappings),
+
+        adapter(
+            "web:notion.so",
+            "Notion Web",
+            mappings(
+                commonBrowserMappings,
+                [
+                    remap("command_palette", to: "cmd+p"),
+                    remap("spotlight_search", to: "cmd+p"),
+                    passthrough("newline_in_field")
+                ]
+            )
+        ),
+        adapter(
+            "web:slack.com",
+            "Slack Web",
+            mappings(commonBrowserMappings, commonChatMappings, [remap("newline_in_field", to: "option+return")])
+        ),
+        adapter(
+            "web:mail.google.com",
+            "Gmail Web",
+            mappings(
+                commonBrowserMappings,
+                [
+                    remap("submit_field", to: "cmd+return"),
+                    passthrough("newline_in_field")
+                ]
+            )
+        ),
+        adapter(
+            "web:docs.google.com",
+            "Google Docs Web",
+            mappings(commonBrowserMappings, [passthrough("find_and_replace"), passthrough("newline_in_field")])
+        ),
+        adapter(
+            "web:figma.com",
+            "Figma Web",
+            mappings(
+                commonBrowserMappings,
+                [
+                    remap("command_palette", to: "cmd+/"),
+                    remap("spotlight_search", to: "cmd+/")
+                ]
+            )
+        ),
+        adapter(
+            "web:linear.app",
+            "Linear Web",
+            mappings(
+                commonBrowserMappings,
+                [
+                    remap("command_palette", to: "cmd+k"),
+                    passthrough("spotlight_search")
+                ]
+            )
+        ),
+        adapter("com.linear", "Linear", mappings(commonDocumentMappings, commonChatMappings)),
+        adapter(
+            "web:chatgpt.com",
+            "ChatGPT Web",
+            mappings(commonBrowserMappings, commonChatMappings)
+        ),
+        adapter(
+            "web:claude.ai",
+            "Claude Web",
+            mappings(commonBrowserMappings, commonChatMappings)
+        ),
+        adapter("web:github.com", "GitHub Web", commonBrowserMappings),
+        adapter("web:calendar.google.com", "Google Calendar Web", commonBrowserMappings),
+        adapter("web:drive.google.com", "Google Drive Web", commonBrowserMappings),
+        adapter("web:sheets.google.com", "Google Sheets Web", commonBrowserMappings),
+        adapter("web:slides.google.com", "Google Slides Web", commonBrowserMappings),
+        adapter("web:meet.google.com", "Google Meet Web", commonBrowserMappings),
+        adapter("web:whatsapp.com", "WhatsApp Web", mappings(commonBrowserMappings, commonChatMappings))
+    ]
+
+    private static func adapter(
+        _ appIdentifier: String,
+        _ appName: String,
+        _ mappings: [Adapter.Mapping]
+    ) -> Adapter {
+        Adapter(
+            appIdentifier: appIdentifier,
+            appName: appName,
+            mappings: mappings
+        )
+    }
+
+    private static func mappings(_ groups: [Adapter.Mapping]...) -> [Adapter.Mapping] {
+        var merged: [Adapter.Mapping] = []
+        var indexesByCanonicalID: [String: Int] = [:]
+
+        for mapping in groups.flatMap({ $0 }) {
+            if let index = indexesByCanonicalID[mapping.canonicalID] {
+                merged[index] = mapping
+            } else {
+                indexesByCanonicalID[mapping.canonicalID] = merged.count
+                merged.append(mapping)
+            }
+        }
+
+        return merged
+    }
+
+    private static func passthrough(_ canonicalID: String) -> Adapter.Mapping {
+        Adapter.Mapping(canonicalID: canonicalID, method: .passthrough)
+    }
+
+    private static func remap(
+        _ canonicalID: String,
+        to nativeKeys: String
+    ) -> Adapter.Mapping {
+        Adapter.Mapping(
+            canonicalID: canonicalID,
+            method: .keyRemap,
+            nativeKeys: keyCombo(nativeKeys)
+        )
+    }
+
+    private static func keyCombo(_ string: String) -> KeyCombo {
+        guard let combo = KeyCombo(from: string) else {
+            preconditionFailure("Invalid built-in key combo: \(string)")
+        }
+        return combo
+    }
 }
 
 // MARK: - JSON encoder helper

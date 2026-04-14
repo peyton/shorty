@@ -78,8 +78,27 @@ Supported normalized web adapter IDs:
 - `web:slack.com`
 - `web:mail.google.com`
 - `web:docs.google.com`
+- `web:calendar.google.com`
+- `web:drive.google.com`
+- `web:sheets.google.com`
+- `web:slides.google.com`
+- `web:meet.google.com`
 - `web:figma.com`
 - `web:linear.app`
+- `web:chatgpt.com`
+- `web:claude.ai`
+- `web:github.com`
+- `web:whatsapp.com`
+
+Built-in native adapters cover common browser, code editor, terminal, document,
+chat, media, and productivity shortcuts for audited apps including Safari,
+Chrome-family browsers, Firefox, ChatGPT Atlas, ChatGPT, Codex, Claude, VS Code,
+VS Code Insiders, Zed, Antigravity, Xcode, Terminal, iTerm2, Ghostty, Finder,
+TextEdit, Notes, Mail, Messages, Preview, Calendar, Maps, Contacts, Music,
+Podcasts, Slack, Discord, Signal, WhatsApp, Zoom, Notion, Notion Mail, Notion
+Calendar, Obsidian, Raycast, Tot, Things, OmniFocus, GoodLinks, Craft, Zettlr,
+Zotero, GitHub Desktop, HTTPie, 1Password, Figma, tldraw, Spotify, Microsoft
+Office, and iWork.
 
 ## Commands
 
