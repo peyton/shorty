@@ -1,0 +1,6 @@
+rules:
+  dangerous-triggers:
+    ignore:
+      # This Dependabot-only workflow uses pull_request_target only to enable
+      # GitHub auto-merge. It does not checkout or execute pull request code.
+      - dependabot-auto-merge.yml
