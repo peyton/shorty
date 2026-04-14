@@ -1,7 +1,7 @@
 /// Shorty tooling checks.
 /// Root wrappers choose which steps run so local and CI behavior stays explicit.
-amends "package://github.com/jdx/hk/releases/download/v1.40.0/hk@1.40.0#/Config.pkl"
-import "package://github.com/jdx/hk/releases/download/v1.40.0/hk@1.40.0#/Builtins.pkl"
+amends "package://github.com/jdx/hk/releases/download/v1.42.0/hk@1.42.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v1.42.0/hk@1.42.0#/Builtins.pkl"
 
 local toolSteps = new Mapping<String, Step> {
   ["markdown"] = (Builtins.rumdl) {}
