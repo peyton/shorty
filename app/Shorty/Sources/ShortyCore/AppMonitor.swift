@@ -8,6 +8,35 @@ import Combine
 /// this on every keystroke (via the fast `currentAppID` property) rather
 /// than querying NSWorkspace each time.
 public final class AppMonitor: ObservableObject {
+    public struct Snapshot: Equatable {
+        public let currentBundleID: String?
+        public let currentAppName: String?
+        public let currentPID: pid_t
+        public let webAppDomain: String?
+        public let browserContextSource: BrowserContextSource
+        public let browserContextUpdatedAt: Date?
+        public let effectiveAppID: String?
+
+        public init(
+            currentBundleID: String?,
+            currentAppName: String?,
+            currentPID: pid_t,
+            webAppDomain: String?,
+            browserContextSource: BrowserContextSource,
+            browserContextUpdatedAt: Date?,
+            effectiveAppID: String?
+        ) {
+            self.currentBundleID = currentBundleID
+            self.currentAppName = currentAppName
+            self.currentPID = currentPID
+            self.webAppDomain = webAppDomain
+            self.browserContextSource = browserContextSource
+            self.browserContextUpdatedAt = browserContextUpdatedAt
+            self.effectiveAppID = effectiveAppID
+        }
+    }
+
+    public static let browserContextExpirationInterval: TimeInterval = 30
 
     /// The bundle identifier of the frontmost app, or nil if unknown.
     @Published public private(set) var currentBundleID: String?
@@ -29,14 +58,13 @@ public final class AppMonitor: ObservableObject {
     /// Returns "web:<domain>" if a browser extension has reported a web app,
     /// otherwise the native bundle ID.
     public var effectiveAppID: String? {
-        if let domain = webAppDomain,
-           isBrowser(currentBundleID) {
-            return DomainNormalizer.adapterIdentifier(for: domain)
-        }
-        return currentBundleID
+        snapshot().effectiveAppID
     }
 
+    @Published public private(set) var browserContextUpdatedAt: Date?
+
     private var cancellable: AnyCancellable?
+    private let stateLock = NSRecursiveLock()
 
     public init() {
         // Seed with current frontmost app
@@ -69,10 +97,12 @@ public final class AppMonitor: ObservableObject {
         localizedName: String?,
         processIdentifier: pid_t
     ) {
+        stateLock.lock()
         let previousBundleID = currentBundleID
         currentBundleID = bundleIdentifier
         currentAppName = localizedName
         currentPID = processIdentifier
+        stateLock.unlock()
 
         if previousBundleID != bundleIdentifier || !isBrowser(bundleIdentifier) {
             clearBrowserContext()
@@ -83,14 +113,68 @@ public final class AppMonitor: ObservableObject {
         domain: String,
         source: BrowserContextSource
     ) {
+        stateLock.lock()
         webAppDomain = DomainNormalizer.normalizedDomain(for: domain)
         browserContextSource = source
+        browserContextUpdatedAt = Date()
+        stateLock.unlock()
     }
 
     public func clearBrowserContext(source: BrowserContextSource? = nil) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard source == nil || source == browserContextSource else { return }
         webAppDomain = nil
         browserContextSource = .none
+        browserContextUpdatedAt = nil
+    }
+
+    @discardableResult
+    public func expireStaleBrowserContext(now: Date = Date()) -> Bool {
+        stateLock.lock()
+        let updatedAt = browserContextUpdatedAt
+        let hasContext = webAppDomain != nil
+        let isStale = updatedAt.map {
+            now.timeIntervalSince($0) > Self.browserContextExpirationInterval
+        } ?? false
+        stateLock.unlock()
+
+        guard hasContext, isStale else { return false }
+        clearBrowserContext()
+        return true
+    }
+
+    public func snapshot(now: Date = Date()) -> Snapshot {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+
+        let domain: String?
+        let source: BrowserContextSource
+        if let updatedAt = browserContextUpdatedAt,
+           now.timeIntervalSince(updatedAt) <= Self.browserContextExpirationInterval {
+            domain = webAppDomain
+            source = browserContextSource
+        } else {
+            domain = nil
+            source = .none
+        }
+
+        let effectiveID: String?
+        if let domain, isBrowser(currentBundleID) {
+            effectiveID = DomainNormalizer.adapterIdentifier(for: domain)
+        } else {
+            effectiveID = currentBundleID
+        }
+
+        return Snapshot(
+            currentBundleID: currentBundleID,
+            currentAppName: currentAppName,
+            currentPID: currentPID,
+            webAppDomain: domain,
+            browserContextSource: source,
+            browserContextUpdatedAt: domain == nil ? nil : browserContextUpdatedAt,
+            effectiveAppID: effectiveID
+        )
     }
 
     // MARK: - Browser detection

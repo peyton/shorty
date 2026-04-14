@@ -1,5 +1,17 @@
 import Foundation
 
+private enum AdapterMappingCodingKeys: String, CodingKey {
+    case canonicalID
+    case method
+    case nativeKeys
+    case menuTitle
+    case menuPath
+    case axAction
+    case context
+    case matchReason
+    case isEnabled
+}
+
 /// A per-app translation table: maps canonical shortcut IDs to native actions.
 ///
 /// Each adapter targets a single application (by bundle ID) or web app
@@ -69,12 +81,21 @@ extension Adapter {
         /// For `.menuInvoke`: the menu item title to trigger via AX.
         public let menuTitle: String?
 
+        /// For `.menuInvoke`: the full menu path, for example ["File", "New Window"].
+        public let menuPath: [String]?
+
         /// For `.axAction`: the AX action string (e.g., "AXPress").
         public let axAction: String?
 
         /// Optional context filter — only apply when this UI context is active.
         /// e.g., "editor", "terminal", "sidebar" (Phase 2+).
         public let context: String?
+
+        /// Human-readable reason for generated mappings, if known.
+        public let matchReason: String?
+
+        /// Whether this mapping participates in resolution.
+        public let isEnabled: Bool
 
         public var id: String { canonicalID }
 
@@ -83,15 +104,34 @@ extension Adapter {
             method: Method,
             nativeKeys: KeyCombo? = nil,
             menuTitle: String? = nil,
+            menuPath: [String]? = nil,
             axAction: String? = nil,
-            context: String? = nil
+            context: String? = nil,
+            matchReason: String? = nil,
+            isEnabled: Bool = true
         ) {
             self.canonicalID = canonicalID
             self.method = method
             self.nativeKeys = nativeKeys
             self.menuTitle = menuTitle
+            self.menuPath = menuPath
             self.axAction = axAction
             self.context = context
+            self.matchReason = matchReason
+            self.isEnabled = isEnabled
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: AdapterMappingCodingKeys.self)
+            canonicalID = try container.decode(String.self, forKey: .canonicalID)
+            method = try container.decode(Method.self, forKey: .method)
+            nativeKeys = try container.decodeIfPresent(KeyCombo.self, forKey: .nativeKeys)
+            menuTitle = try container.decodeIfPresent(String.self, forKey: .menuTitle)
+            menuPath = try container.decodeIfPresent([String].self, forKey: .menuPath)
+            axAction = try container.decodeIfPresent(String.self, forKey: .axAction)
+            context = try container.decodeIfPresent(String.self, forKey: .context)
+            matchReason = try container.decodeIfPresent(String.self, forKey: .matchReason)
+            isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         }
     }
 }

@@ -34,7 +34,10 @@ let marketingVersion = nonEmptyTrimmed(
 ) ?? repoVersion()
 let buildNumber = nonEmptyTrimmed(Environment.shortyBuildNumber.getString(default: "")) ?? "1"
 
-func targetSettings(includeAppAssets: Bool = false) -> Settings {
+func targetSettings(
+    includeAppAssets: Bool = false,
+    activeCompilationConditions: [String] = []
+) -> Settings {
     var base = SettingsDictionary()
         .automaticCodeSigning(devTeam: signingTeam)
     if includeAppAssets {
@@ -45,6 +48,11 @@ func targetSettings(includeAppAssets: Bool = false) -> Settings {
     base["COMPILATION_CACHE_ENABLE_PLUGIN"] = .string("NO")
     base["MARKETING_VERSION"] = .string(marketingVersion)
     base["CURRENT_PROJECT_VERSION"] = .string(buildNumber)
+    if !activeCompilationConditions.isEmpty {
+        base["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = .string(
+            activeCompilationConditions.joined(separator: " ")
+        )
+    }
     return .settings(base: base)
 }
 
@@ -86,7 +94,10 @@ let project = Project(
                 .target(name: "ShortyCore"),
                 .target(name: "ShortySafariWebExtension")
             ],
-            settings: targetSettings(includeAppAssets: true)
+            settings: targetSettings(
+                includeAppAssets: true,
+                activeCompilationConditions: ["SHORTY_APP_STORE"]
+            )
         ),
         .target(
             name: "ShortyAppStore",

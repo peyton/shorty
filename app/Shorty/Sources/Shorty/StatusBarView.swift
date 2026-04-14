@@ -41,6 +41,7 @@ struct StatusBarSnapshot {
     let eventsPassedThrough: Int
     let menuActionsInvoked: Int
     let accessibilityActionsInvoked: Int
+    let contextGuardsApplied: Int
     let validationMessages: [String]
     let adapterGenerationMessage: String?
     let hasGeneratedAdapterPreview: Bool
@@ -62,7 +63,8 @@ struct StatusBarSnapshot {
     }
 
     static func live(engine: ShortcutEngine) -> StatusBarSnapshot {
-        let appID = engine.appMonitor.effectiveAppID
+        let appSnapshot = engine.appMonitor.snapshot()
+        let appID = appSnapshot.effectiveAppID
         let activeTitle = activeContextTitle(engine: engine, appID: appID)
         let availability = engine.registry.availability(
             for: appID,
@@ -70,7 +72,7 @@ struct StatusBarSnapshot {
         )
 
         let normalizedWebDomain: String
-        if let domain = engine.appMonitor.webAppDomain {
+        if let domain = appSnapshot.webAppDomain {
             normalizedWebDomain = DomainNormalizer.normalizedDomain(for: domain)
         } else {
             normalizedWebDomain = "None"
@@ -83,7 +85,7 @@ struct StatusBarSnapshot {
                 eventTapEnabled: engine.eventTap.isEnabled,
                 isWaitingForPermission: engine.isWaitingForAccessibilityPermission
             ),
-            currentAppName: engine.appMonitor.currentAppName ?? "Unknown",
+            currentAppName: appSnapshot.currentAppName ?? "Unknown",
             activeContextTitle: activeTitle,
             availability: availability,
             lifecycleMessage: importantLifecycleMessage(engine: engine),
@@ -91,7 +93,7 @@ struct StatusBarSnapshot {
             adapterSource: availability.adapterSource?.statusLabel ?? "none",
             mappingCount: "\(availability.shortcuts.count)",
             webDomain: normalizedWebDomain,
-            browserContextSource: engine.appMonitor.browserContextSource.title,
+            browserContextSource: appSnapshot.browserContextSource.title,
             bridgeStatus: engine.browserBridge?.status.title ?? "Unavailable",
             safariExtensionStatus: engine.safariExtensionStatus.title,
             shortcutReviewCount: engine.shortcutProfile.conflicts().count,
@@ -101,6 +103,7 @@ struct StatusBarSnapshot {
             eventsPassedThrough: engine.eventTap.counters.eventsPassedThrough,
             menuActionsInvoked: engine.eventTap.counters.menuActionsInvoked,
             accessibilityActionsInvoked: engine.eventTap.counters.accessibilityActionsInvoked,
+            contextGuardsApplied: engine.eventTap.counters.contextGuardsApplied,
             validationMessages: engine.registry.validationMessages,
             adapterGenerationMessage: engine.adapterGenerationMessage,
             hasGeneratedAdapterPreview: engine.generatedAdapterPreview != nil
@@ -134,23 +137,36 @@ struct StatusBarActions {
     let openAccessibilitySettings: () -> Void
     let addCurrentApp: () -> Void
     let openSettings: () -> Void
+    let pauseCurrentApp: () -> Void
+    let resumeCurrentApp: () -> Void
+    let pauseFor15Minutes: () -> Void
     let quit: () -> Void
 
     static let noop = StatusBarActions(
         openAccessibilitySettings: {},
         addCurrentApp: {},
         openSettings: {},
+        pauseCurrentApp: {},
+        resumeCurrentApp: {},
+        pauseFor15Minutes: {},
         quit: {}
     )
 
     static func live(engine: ShortcutEngine) -> StatusBarActions {
         StatusBarActions(
             openAccessibilitySettings: { engine.openAccessibilitySettings() },
-            addCurrentApp: { engine.generateAdapterForCurrentApp() },
+            addCurrentApp: {
+                engine.generateAdapterForCurrentApp()
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                NSApp.activate(ignoringOtherApps: true)
+            },
             openSettings: {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                 NSApp.activate(ignoringOtherApps: true)
             },
+            pauseCurrentApp: { engine.pauseCurrentApp() },
+            resumeCurrentApp: { engine.resumeCurrentApp() },
+            pauseFor15Minutes: { engine.pauseForDuration(15 * 60) },
             quit: {
                 engine.stop()
                 NSApp.terminate(nil)
@@ -192,6 +208,7 @@ struct StatusBarContentView: View {
         }
         .padding(16)
         .frame(width: 430)
+        .accessibilityIdentifier("status-popover")
     }
 }
 
@@ -249,6 +266,8 @@ private struct CoverageBadge: View {
         switch availability.state {
         case .available:
             return ShortyBrand.teal
+        case .paused:
+            return ShortyBrand.amber
         case .noActiveApp, .noAdapter:
             return .secondary
         }
@@ -258,6 +277,8 @@ private struct CoverageBadge: View {
         switch availability.state {
         case .available:
             return ShortyBrand.teal.opacity(0.12)
+        case .paused:
+            return ShortyBrand.amber.opacity(0.12)
         case .noActiveApp, .noAdapter:
             return Color.secondary.opacity(0.12)
         }
@@ -332,6 +353,20 @@ private struct AvailableShortcutsSection: View {
                 switch snapshot.availability.state {
                 case .available:
                     ShortcutList(shortcuts: snapshot.availability.shortcuts)
+                    HStack(spacing: 8) {
+                        Button("Pause This App", action: actions.pauseCurrentApp)
+                        Button("Pause 15 Min", action: actions.pauseFor15Minutes)
+                    }
+                    .controlSize(.small)
+                case .paused:
+                    EmptyShortcutState(
+                        title: "Paused for this app",
+                        detail: "Shorty is passing keys through for this app.",
+                        showsAddButton: false,
+                        actions: actions
+                    )
+                    Button("Resume This App", action: actions.resumeCurrentApp)
+                        .controlSize(.small)
                 case .noActiveApp:
                     EmptyShortcutState(
                         title: "No app selected",
@@ -519,6 +554,7 @@ private struct DetailsSection: View {
                 StatusInfoRow("Native pass-throughs", "\(snapshot.eventsPassedThrough)")
                 StatusInfoRow("Menu actions", "\(snapshot.menuActionsInvoked)")
                 StatusInfoRow("Accessibility actions", "\(snapshot.accessibilityActionsInvoked)")
+                StatusInfoRow("Context guards", "\(snapshot.contextGuardsApplied)")
 
                 if !snapshot.validationMessages.isEmpty {
                     Label(
@@ -541,10 +577,12 @@ private struct StatusFooter: View {
     var body: some View {
         HStack {
             Button("Settings...", action: actions.openSettings)
+                .accessibilityIdentifier("status-settings")
 
             Spacer()
 
             Button("Quit", action: actions.quit)
+                .accessibilityIdentifier("status-quit")
         }
     }
 }

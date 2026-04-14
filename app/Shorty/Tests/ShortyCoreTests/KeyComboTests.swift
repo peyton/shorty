@@ -308,7 +308,7 @@ final class KeyComboTests: XCTestCase {
         let payload = Data(#"{"type":"domain_changed","domain":"workspace.slack.com"}"#.utf8)
         XCTAssertEqual(
             BrowserBridge.decodeMessagePayload(payload),
-            .domainChanged("slack.com")
+            .domainChanged("slack.com", BrowserBridge.MessageMetadata())
         )
     }
 
@@ -335,12 +335,12 @@ final class KeyComboTests: XCTestCase {
         )
     }
 
-    func testBrowserBridgeRejectsUnsupportedDomainByDefault() {
+    func testBrowserBridgeClearsUnsupportedDomainByDefault() {
         let payload = Data(#"{"type":"domain_changed","domain":"example.com"}"#.utf8)
-        XCTAssertNil(BrowserBridge.decodeMessagePayload(payload))
+        XCTAssertEqual(BrowserBridge.decodeMessagePayload(payload), .domainCleared)
         XCTAssertEqual(
             BrowserBridge.decodeMessagePayload(payload, reportAllDomains: true),
-            .domainChanged("example.com")
+            .domainChanged("example.com", BrowserBridge.MessageMetadata())
         )
     }
 
@@ -519,13 +519,19 @@ final class KeyComboTests: XCTestCase {
         counters.recordResolvedAction(.invokeMenu("New Window"))
         counters.recordKeyDownEvent()
         counters.recordResolvedAction(.performAXAction("AXPress"))
+        counters.recordAsyncActionResult(kind: .menuInvoke, succeeded: true)
+        counters.recordAsyncActionResult(kind: .axAction, succeeded: false)
+        counters.recordContextGuard()
 
         XCTAssertEqual(counters.keyDownEventsSeen, 4)
         XCTAssertEqual(counters.shortcutsMatched, 4)
-        XCTAssertEqual(counters.eventsPassedThrough, 1)
+        XCTAssertEqual(counters.eventsPassedThrough, 2)
         XCTAssertEqual(counters.eventsRemapped, 1)
         XCTAssertEqual(counters.menuActionsInvoked, 1)
+        XCTAssertEqual(counters.menuActionsSucceeded, 1)
         XCTAssertEqual(counters.accessibilityActionsInvoked, 1)
+        XCTAssertEqual(counters.accessibilityActionsFailed, 1)
+        XCTAssertEqual(counters.contextGuardsApplied, 1)
     }
 
     func testEventTapCountersMergePendingFlushes() {
@@ -534,7 +540,9 @@ final class KeyComboTests: XCTestCase {
             keyDownEventsSeen: 2,
             shortcutsMatched: 2,
             eventsRemapped: 1,
-            eventsPassedThrough: 1
+            eventsPassedThrough: 1,
+            menuActionsSucceeded: 1,
+            contextGuardsApplied: 1
         )
 
         counters.merge(pending)
@@ -543,6 +551,8 @@ final class KeyComboTests: XCTestCase {
         XCTAssertEqual(counters.shortcutsMatched, 3)
         XCTAssertEqual(counters.eventsRemapped, 1)
         XCTAssertEqual(counters.eventsPassedThrough, 1)
+        XCTAssertEqual(counters.menuActionsSucceeded, 1)
+        XCTAssertEqual(counters.contextGuardsApplied, 1)
     }
 
     func testReleaseConfigurationDisablesAutoAdapterGenerationByDefault() {

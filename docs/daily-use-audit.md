@@ -2,7 +2,7 @@
 
 Date: 2026-04-14
 
-Claude Code was requested as the independent reviewer. The local `claude` CLI is installed, but the run was blocked by a rate limit: `You've hit your limit · resets 11am (America/Los_Angeles)`. I used a read-only fallback subagent with the same prompt and reviewed its output against the codebase. This document keeps both proposal sets concrete and anchored so the backlog is actionable.
+Claude Code was requested as the independent reviewer. The first local `claude` CLI run was blocked by a rate limit: `You've hit your limit · resets 11am (America/Los_Angeles)`, so I used a read-only fallback subagent with the same prompt and reviewed its output against the codebase. After Claude access was restored, I ran Claude Code again against the implemented repo, reviewed its findings, and applied the confirmed issues. This document keeps both proposal sets concrete and anchored so the backlog is actionable.
 
 ## Local Staff-Level Proposals
 
@@ -140,3 +140,25 @@ The fallback reviewer produced 65 proposals. I reviewed them and found the follo
 - Added generated adapter confidence/reasons/warnings and revision tracking.
 - Used split event counters in diagnostics and status details.
 - Added tests for event counters, bridge install status parsing, and generated adapter review.
+- Added immutable app/adapter resolution snapshots so the event tap no longer reads mutable registry/app-monitor state directly.
+- Added per-action success/failure diagnostics, last-action metadata, context-guard counts, and performance signposts.
+- Added a repeated event-tap startup failure backoff that pauses retries temporarily instead of failing in a tight loop.
+- Added menu-path based invocation with depth/count/time traversal limits.
+- Added browser bridge protocol metadata, message-size limits, socket state locking, unsupported-domain clearing, and stale browser context expiry.
+- Replaced browser extension `<all_urls>` host access with explicit supported web-app domains.
+- Added per-shortcut editing, capture, enable/disable, reset, macOS-reserved conflict detection, and keyboard layout display.
+- Added persisted shortcut profile state for shortcut, adapter, and mapping disables.
+- Added per-app pause, global pause, pause-until-tomorrow, and resume controls in Settings and the status popover.
+- Added adapter search by canonical/native/menu metadata, per-adapter enable/disable, per-mapping enable/disable, delete, import, and export.
+- Added generated-adapter dangerous mapping approval gates, match reasons, menu paths, and revision history.
+- Added app-specific caveats for terminals, browsers, password managers, and chat-style apps.
+- Added App Store candidate runtime configuration that avoids starting the event tap and browser bridge.
+- Added redacted diagnostics/support bundle paths and distribution mode in diagnostics.
+- Added copyable bridge install/uninstall command guidance with extension ID validation.
+- Added `just typecheck-app` and `just adapter-coverage-audit` repo-local tooling.
+- Added `docs/troubleshooting.md` for permissions, browser bridge, Safari extension, generated adapters, and support bundle guidance.
+- Re-consulted Claude Code after access was restored and applied the confirmed follow-ups: synchronized the event-tap enable flag, invalidated the Mach port on stop, tightened risky built-in remaps to require explicit context, reduced false-positive generated menu matches, persisted adapter revisions, reused the native bridge socket for a host session, optimized menu traversal deadlines, and added browser domain parity tests.
+
+## Deferred After Review
+
+The following proposals were intentionally left as follow-up architecture/dependency work rather than merged into this pass: splitting large SwiftUI files, moving the built-in adapter catalog out of `AdapterRegistry`, wiring a real Sparkle updater, replacing copyable bridge commands with a native installer, and adding deterministic service abstractions plus screenshot automation around Xcode. The current behavior is hardened without those structural changes.

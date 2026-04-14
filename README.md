@@ -108,9 +108,11 @@ App:
 
 - `just generate` - generate `app/Shorty.xcworkspace` with Tuist.
 - `just build` - build the app.
+- `just typecheck-app` - fast Swift source typecheck for the app, bridge, and screenshot targets.
 - `just run` - build and launch the app.
 - `just test-app` - run Swift tests.
 - `just integration` - build a small macOS fixture app and exercise launch/menu automation.
+- `just adapter-coverage-audit` - list installed macOS apps that do not have an obvious built-in adapter.
 - `just install-browser-bridge EXTENSION_ID=<id> BROWSERS=chrome` - build and install browser native messaging manifests.
 - `just uninstall-browser-bridge BROWSERS=chrome` - remove browser native messaging manifests.
 

@@ -18,6 +18,10 @@ private func connectToShorty() throws -> Int32 {
     addr.sun_family = sa_family_t(AF_UNIX)
     let socketPath = BrowserBridge.defaultSocketPath
     let socketPathCapacity = MemoryLayout.size(ofValue: addr.sun_path)
+    guard socketPath.utf8.count < socketPathCapacity else {
+        close(fileDescriptor)
+        throw BridgeExit.cannotConnect
+    }
     socketPath.withCString { ptr in
         withUnsafeMutableBytes(of: &addr.sun_path) { pathBytes in
             guard let pathBuffer = pathBytes.baseAddress?
@@ -54,7 +58,7 @@ private func writeNativeMessage(_ json: String) {
     _ = BrowserBridge.writeAll(lengthData + payload, to: STDOUT_FILENO)
 }
 
-private func forwardNextMessage() throws -> Bool {
+private func forwardNextMessage(to socket: Int32) throws -> Bool {
     guard let lengthData = BrowserBridge.readExactly(from: STDIN_FILENO, count: 4) else {
         return false
     }
@@ -69,9 +73,6 @@ private func forwardNextMessage() throws -> Bool {
 
     var frame = lengthData
     frame.append(payload)
-
-    let socket = try connectToShorty()
-    defer { close(socket) }
 
     guard BrowserBridge.writeAll(frame, to: socket),
           let ackLengthData = BrowserBridge.readExactly(from: socket, count: 4),
@@ -91,7 +92,9 @@ private func forwardNextMessage() throws -> Bool {
 }
 
 do {
-    while try forwardNextMessage() {}
+    let socket = try connectToShorty()
+    defer { close(socket) }
+    while try forwardNextMessage(to: socket) {}
 } catch BridgeExit.cannotConnect {
     writeNativeMessage(#"{"type":"error","message":"Shorty is not running"}"#)
     exit(1)

@@ -1,5 +1,8 @@
 import AppKit
 import Combine
+#if canImport(SafariServices)
+import SafariServices
+#endif
 import ServiceManagement
 
 /// Top-level orchestrator for monitoring the active app, resolving adapters,
@@ -7,6 +10,8 @@ import ServiceManagement
 public final class ShortcutEngine: ObservableObject {
     public static let firstRunCompleteDefaultsKey = "Shorty.FirstRun.Complete"
     public static let updateChecksEnabledDefaultsKey = "Shorty.Updates.AutomaticChecksEnabled"
+    public static let globalPauseUntilDefaultsKey = "Shorty.GlobalPauseUntil"
+    public static let adapterRevisionsDefaultsKey = "Shorty.AdapterRevisions"
 
     // MARK: - Sub-components
 
@@ -34,6 +39,8 @@ public final class ShortcutEngine: ObservableObject {
     @Published public private(set) var generatedAdapterReview: AdapterReview?
     @Published public private(set) var adapterRevisions: [AdapterRevision] = []
     @Published public private(set) var adapterGenerationMessage: String?
+    @Published public private(set) var globalPauseUntil: Date?
+    @Published public private(set) var settingsFeedbackMessage: String?
 
     /// Last error message kept for older UI callsites.
     @Published public var lastError: String?
@@ -44,9 +51,14 @@ public final class ShortcutEngine: ObservableObject {
     private var appChangeObserverInstalled = false
     private var adapterGenerationInFlight = Set<String>()
     private var accessibilityPermissionTimer: Timer?
+    private var tapFailureDates: [Date] = []
+    private var tapSafeModeUntil: Date?
     private let userDefaults: UserDefaults
     private let safariExtensionUserDefaults: UserDefaults?
     private let bridgeInstallManager: BrowserBridgeInstallManager
+    private let tapFailureLimit = 3
+    private let tapFailureWindow: TimeInterval = 5 * 60
+    private let tapSafeModeDuration: TimeInterval = 5 * 60
 
     // MARK: - Init
 
@@ -60,7 +72,11 @@ public final class ShortcutEngine: ObservableObject {
         self.configuration = configuration
         self.userDefaults = userDefaults
         self.safariExtensionUserDefaults = safariExtensionUserDefaults
-        self.shortcutProfile = .releaseDefault
+        let loadedShortcutProfile = Self.loadShortcutProfile(userDefaults: userDefaults)
+        self.shortcutProfile = loadedShortcutProfile
+        self.globalPauseUntil = userDefaults.object(
+            forKey: Self.globalPauseUntilDefaultsKey
+        ) as? Date
         self.isFirstRunComplete = userDefaults.bool(
             forKey: Self.firstRunCompleteDefaultsKey
         )
@@ -75,6 +91,7 @@ public final class ShortcutEngine: ObservableObject {
         self.launchAtLoginStatus = Self.currentLaunchAtLoginStatus()
         self.bridgeInstallManager = BrowserBridgeInstallManager()
         self.bridgeInstallStatuses = bridgeInstallManager.statuses()
+        self.adapterRevisions = Self.loadAdapterRevisions(userDefaults: userDefaults)
         self.appMonitor = AppMonitor()
         self.registry = AdapterRegistry()
         self.eventTap = EventTapManager(
@@ -87,6 +104,7 @@ public final class ShortcutEngine: ObservableObject {
             appMonitor: appMonitor,
             configuration: configuration
         )
+        self.registry.applyShortcutProfile(loadedShortcutProfile)
 
         DistributedNotificationCenter.default()
             .publisher(for: SafariExtensionBridge.notificationName)
@@ -102,6 +120,12 @@ public final class ShortcutEngine: ObservableObject {
                 self.setStatus(isEnabled ? .running : .disabled)
             }
             .store(in: &cancellables)
+
+        appMonitor.$currentBundleID
+            .sink { [weak self] _ in
+                self?.appMonitor.expireStaleBrowserContext()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Lifecycle
@@ -114,10 +138,23 @@ public final class ShortcutEngine: ObservableObject {
         }
 
         setStatus(.starting)
+        expireGlobalPauseIfNeeded()
         installAppChangeObserverIfNeeded()
         refreshSafariExtensionMessage()
-        browserBridge?.start()
+        refreshSafariExtensionState()
+        refreshBridgeInstallStatuses()
+        refreshLaunchAtLoginStatus()
+        if configuration.startsBrowserBridge {
+            browserBridge?.start()
+        }
         refreshPermissionState()
+
+        guard configuration.startsEventTap else {
+            isRunning = true
+            setStatus(.disabled)
+            lastError = "This build does not start the keyboard event tap."
+            return
+        }
 
         guard permissionState.isGranted else {
             setStatus(.permissionRequired)
@@ -125,15 +162,19 @@ public final class ShortcutEngine: ObservableObject {
             return
         }
 
-        let tapOK = eventTap.start()
-        guard tapOK else {
-            setStatus(.failed(
-                "Could not install the keyboard tap. Check Accessibility permission and try again."
-            ))
+        guard canAttemptEventTapStart() else {
             return
         }
 
+        let tapOK = eventTap.start()
+        guard tapOK else {
+            recordTapStartFailure()
+            return
+        }
+
+        clearTapStartFailures()
         isRunning = true
+        applyPauseStateIfNeeded()
         setStatus(eventTap.isEnabled ? .running : .disabled)
     }
 
@@ -150,6 +191,7 @@ public final class ShortcutEngine: ObservableObject {
     }
 
     public func checkAccessibilityAndRetry() {
+        expireGlobalPauseIfNeeded()
         refreshPermissionState()
         guard permissionState.isGranted else {
             setStatus(.permissionRequired)
@@ -236,11 +278,110 @@ public final class ShortcutEngine: ObservableObject {
     public func applyShortcutProfile(_ profile: UserShortcutProfile) {
         shortcutProfile = profile
         registry.applyShortcutProfile(profile)
+        persistShortcutProfile()
+    }
+
+    public func updateShortcut(_ shortcutID: String, keyCombo: KeyCombo) {
+        var next = shortcutProfile
+        next.updateShortcut(shortcutID, keyCombo: keyCombo)
+        applyShortcutProfile(next)
+        settingsFeedbackMessage = "Updated shortcut."
+    }
+
+    public func resetShortcut(_ shortcutID: String) {
+        var next = shortcutProfile
+        next.resetShortcut(shortcutID)
+        applyShortcutProfile(next)
+        settingsFeedbackMessage = "Reset shortcut."
+    }
+
+    public func setShortcut(_ shortcutID: String, enabled: Bool) {
+        var next = shortcutProfile
+        next.setShortcut(shortcutID, enabled: enabled)
+        applyShortcutProfile(next)
+        settingsFeedbackMessage = enabled ? "Shortcut enabled." : "Shortcut disabled."
+    }
+
+    public func setAdapter(_ appIdentifier: String, enabled: Bool) {
+        var next = shortcutProfile
+        next.setAdapter(appIdentifier, enabled: enabled)
+        applyShortcutProfile(next)
+        settingsFeedbackMessage = enabled ? "App shortcuts resumed." : "App shortcuts paused."
+    }
+
+    public func setMapping(
+        adapterID: String,
+        canonicalID: String,
+        enabled: Bool
+    ) {
+        var next = shortcutProfile
+        next.setMapping(
+            adapterID: adapterID,
+            canonicalID: canonicalID,
+            enabled: enabled
+        )
+        applyShortcutProfile(next)
+        settingsFeedbackMessage = enabled ? "Mapping enabled." : "Mapping disabled."
+    }
+
+    public func deleteAdapter(appIdentifier: String) {
+        do {
+            try registry.deleteEditableAdapter(appIdentifier: appIdentifier)
+            settingsFeedbackMessage = "Deleted adapter."
+        } catch {
+            settingsFeedbackMessage = "Could not delete adapter: \(error)"
+        }
+    }
+
+    public func exportAdapter(appIdentifier: String, to url: URL) throws {
+        try registry.exportAdapter(appIdentifier: appIdentifier, to: url)
+        settingsFeedbackMessage = "Exported adapter."
+    }
+
+    public func importAdapter(from url: URL) {
+        do {
+            let adapter = try registry.importUserAdapter(from: url)
+            recordAdapterRevision(
+                adapter,
+                summary: "Imported user adapter with \(adapter.mappings.count) mappings."
+            )
+            settingsFeedbackMessage = "Imported adapter for \(adapter.appName)."
+        } catch {
+            settingsFeedbackMessage = "Could not import adapter: \(error)"
+        }
+    }
+
+    public func pauseCurrentApp() {
+        guard let appID = appMonitor.snapshot().effectiveAppID else { return }
+        setAdapter(appID, enabled: false)
+    }
+
+    public func resumeCurrentApp() {
+        guard let appID = appMonitor.snapshot().effectiveAppID else { return }
+        setAdapter(appID, enabled: true)
+    }
+
+    public func pauseForDuration(_ duration: TimeInterval) {
+        let until = Date().addingTimeInterval(duration)
+        globalPauseUntil = until
+        userDefaults.set(until, forKey: Self.globalPauseUntilDefaultsKey)
+        eventTap.isEnabled = false
+        setStatus(.disabled)
+        settingsFeedbackMessage = "Paused until \(Self.relativeTimeFormatter.localizedString(for: until, relativeTo: Date()))."
+    }
+
+    public func resumeGlobalPause() {
+        globalPauseUntil = nil
+        userDefaults.removeObject(forKey: Self.globalPauseUntilDefaultsKey)
+        eventTap.isEnabled = true
+        setStatus(isRunning ? .running : status)
+        settingsFeedbackMessage = "Shortcut translation resumed."
     }
 
     public func markFirstRunComplete() {
         isFirstRunComplete = true
         userDefaults.set(true, forKey: Self.firstRunCompleteDefaultsKey)
+        settingsFeedbackMessage = "Setup complete. Shorty is ready when Accessibility access is enabled."
     }
 
     public func resetFirstRunState() {
@@ -268,6 +409,15 @@ public final class ShortcutEngine: ObservableObject {
 
     public func refreshBridgeInstallStatuses() {
         bridgeInstallStatuses = bridgeInstallManager.statuses()
+    }
+
+    public func refreshDailyStatuses() {
+        refreshLaunchAtLoginStatus()
+        refreshBridgeInstallStatuses()
+        refreshSafariExtensionMessage()
+        refreshSafariExtensionState()
+        appMonitor.expireStaleBrowserContext()
+        expireGlobalPauseIfNeeded()
     }
 
     public func setLaunchAtLoginEnabled(_ isEnabled: Bool) {
@@ -300,6 +450,21 @@ public final class ShortcutEngine: ObservableObject {
             sourceURL: updateStatus.sourceURL,
             automaticChecksEnabled: updateStatus.automaticChecksEnabled,
             detail: detail
+        )
+    }
+
+    public func checkForUpdates() {
+        guard let sourceURL = updateStatus.sourceURL else {
+            recordUpdateCheckResult(
+                state: .failed,
+                detail: "No update feed is configured for this build."
+            )
+            return
+        }
+        NSWorkspace.shared.open(sourceURL)
+        recordUpdateCheckResult(
+            state: .idle,
+            detail: "Opened Shorty's release page. Sparkle appcast checks will replace this when bundled."
         )
     }
 
@@ -352,27 +517,84 @@ public final class ShortcutEngine: ObservableObject {
         }
     }
 
+    public func refreshSafariExtensionState() {
+#if canImport(SafariServices)
+        let bundleIdentifier = SafariExtensionStatus.bundleIdentifier(
+            forAppBundleIdentifier: Bundle.main.bundleIdentifier
+        )
+        SFSafariExtensionManager.getStateOfSafariExtension(
+            withIdentifier: bundleIdentifier
+        ) { [weak self] state, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let error {
+                    self.safariExtensionStatus = SafariExtensionStatus(
+                        state: .needsAttention,
+                        bundleIdentifier: bundleIdentifier,
+                        lastMessageAt: self.safariExtensionStatus.lastMessageAt,
+                        lastDomain: self.safariExtensionStatus.lastDomain,
+                        detail: "Could not read Safari extension state: \(error.localizedDescription)"
+                    )
+                    return
+                }
+                guard let state else {
+                    self.safariExtensionStatus = SafariExtensionStatus(
+                        state: .missing,
+                        bundleIdentifier: bundleIdentifier,
+                        lastMessageAt: self.safariExtensionStatus.lastMessageAt,
+                        lastDomain: self.safariExtensionStatus.lastDomain,
+                        detail: "Safari did not find Shorty's extension."
+                    )
+                    return
+                }
+                if self.safariExtensionStatus.lastMessageAt != nil,
+                   self.safariExtensionStatus.state == .enabled {
+                    return
+                }
+                self.safariExtensionStatus = SafariExtensionStatus(
+                    state: state.isEnabled ? .enabled : .disabled,
+                    bundleIdentifier: bundleIdentifier,
+                    lastMessageAt: self.safariExtensionStatus.lastMessageAt,
+                    lastDomain: self.safariExtensionStatus.lastDomain,
+                    detail: state.isEnabled
+                        ? "Safari extension is enabled."
+                        : "Enable Shorty in Safari Settings > Extensions."
+                )
+            }
+        }
+#endif
+    }
+
     public func setSafariExtensionStatus(_ status: SafariExtensionStatus) {
         safariExtensionStatus = status
     }
 
     public func diagnosticSnapshot() -> RuntimeDiagnosticSnapshot {
-        RuntimeDiagnosticSnapshot(
+        eventTap.flushPendingDiagnostics()
+        let appSnapshot = appMonitor.snapshot()
+        return RuntimeDiagnosticSnapshot(
             engineStatus: status.title,
             permissionState: permissionState,
-            currentAppName: appMonitor.currentAppName,
-            currentBundleID: appMonitor.currentBundleID,
-            effectiveAppID: appMonitor.effectiveAppID,
-            browserContextSource: appMonitor.browserContextSource,
-            webDomain: appMonitor.webAppDomain,
-            bridgeStatus: browserBridge?.status.title ?? "Unavailable",
+            currentAppName: appSnapshot.currentAppName,
+            currentBundleID: appSnapshot.currentBundleID,
+            effectiveAppID: appSnapshot.effectiveAppID,
+            browserContextSource: appSnapshot.browserContextSource,
+            webDomain: appSnapshot.webAppDomain,
+            bridgeStatus: redacted(browserBridge?.status.detail ?? "Unavailable"),
             safariExtensionStatus: safariExtensionStatus,
             eventsIntercepted: eventTap.eventsIntercepted,
             eventsMatched: eventTap.shortcutsMatched,
             eventsRemapped: eventTap.eventsRemapped,
             eventsPassedThrough: eventTap.counters.eventsPassedThrough,
             menuActionsInvoked: eventTap.counters.menuActionsInvoked,
+            menuActionsSucceeded: eventTap.counters.menuActionsSucceeded,
+            menuActionsFailed: eventTap.counters.menuActionsFailed,
             accessibilityActionsInvoked: eventTap.counters.accessibilityActionsInvoked,
+            accessibilityActionsSucceeded: eventTap.counters.accessibilityActionsSucceeded,
+            accessibilityActionsFailed: eventTap.counters.accessibilityActionsFailed,
+            contextGuardsApplied: eventTap.counters.contextGuardsApplied,
+            lastAction: eventTap.lastAction,
+            distributionMode: Self.distributionMode(),
             adapterValidationMessages: registry.validationMessages
         )
     }
@@ -389,12 +611,13 @@ public final class ShortcutEngine: ObservableObject {
             displayName: appMonitor.currentAppName
         )
 
+        eventTap.flushPendingDiagnostics()
         return SupportBundle(
             summary: SupportBundleSummary(
                 appVersion: updateStatus.currentVersion,
                 updateStatus: updateStatus,
                 launchAtLoginStatus: launchAtLoginStatus,
-                bridgeInstallStatuses: bridgeInstallStatuses,
+                bridgeInstallStatuses: bridgeInstallStatuses.map(redacted),
                 adapterRevisionCount: adapterRevisions.count,
                 adapterCount: adapterIDs.count,
                 adapterCountsBySource: adapterCountsBySource,
@@ -574,7 +797,8 @@ public final class ShortcutEngine: ObservableObject {
             adapterIdentifier: adapter.appIdentifier,
             confidence: confidence,
             reasons: reasons,
-            warnings: warnings
+            warnings: warnings,
+            requiresExplicitApproval: !riskyMappings.isEmpty || confidence < 0.5
         )
     }
 
@@ -590,6 +814,78 @@ public final class ShortcutEngine: ObservableObject {
         if adapterRevisions.count > 20 {
             adapterRevisions.removeLast(adapterRevisions.count - 20)
         }
+        persistAdapterRevisions()
+    }
+
+    private func persistShortcutProfile() {
+        do {
+            userDefaults.set(
+                try shortcutProfile.encodedJSON(),
+                forKey: UserShortcutProfile.defaultsKey
+            )
+        } catch {
+            ShortyLog.engine.error("Failed to persist shortcut profile: \(error.localizedDescription)")
+        }
+    }
+
+    private func persistAdapterRevisions() {
+        do {
+            userDefaults.set(
+                try JSONEncoder().encode(adapterRevisions),
+                forKey: Self.adapterRevisionsDefaultsKey
+            )
+        } catch {
+            ShortyLog.engine.error("Failed to persist adapter revisions: \(error.localizedDescription)")
+        }
+    }
+
+    private static func loadShortcutProfile(userDefaults: UserDefaults) -> UserShortcutProfile {
+        guard let data = userDefaults.data(forKey: UserShortcutProfile.defaultsKey),
+              let profile = try? UserShortcutProfile.decode(from: data)
+        else {
+            return .releaseDefault
+        }
+        return profile
+    }
+
+    private static func loadAdapterRevisions(userDefaults: UserDefaults) -> [AdapterRevision] {
+        guard let data = userDefaults.data(forKey: adapterRevisionsDefaultsKey),
+              let revisions = try? JSONDecoder().decode([AdapterRevision].self, from: data)
+        else {
+            return []
+        }
+        return Array(revisions.prefix(20))
+    }
+
+    private func expireGlobalPauseIfNeeded(now: Date = Date()) {
+        guard let pauseUntil = globalPauseUntil, now >= pauseUntil else { return }
+        resumeGlobalPause()
+    }
+
+    private func applyPauseStateIfNeeded(now: Date = Date()) {
+        guard let pauseUntil = globalPauseUntil else { return }
+        if now >= pauseUntil {
+            resumeGlobalPause()
+        } else {
+            eventTap.isEnabled = false
+            setStatus(.disabled)
+        }
+    }
+
+    private func redacted(_ status: BridgeInstallStatus) -> BridgeInstallStatus {
+        BridgeInstallStatus(
+            browser: status.browser,
+            state: status.state,
+            manifestPath: status.manifestPath.map(redacted),
+            helperPath: status.helperPath.map(redacted),
+            detail: redacted(status.detail)
+        )
+    }
+
+    private func redacted(_ text: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        guard !home.isEmpty else { return text }
+        return text.replacingOccurrences(of: home, with: "~")
     }
 
     // MARK: - Status
@@ -604,6 +900,46 @@ public final class ShortcutEngine: ObservableObject {
         case .stopped, .starting, .running, .disabled:
             lastError = nil
         }
+    }
+
+    private func canAttemptEventTapStart(now: Date = Date()) -> Bool {
+        guard let tapSafeModeUntil else {
+            return true
+        }
+        if tapSafeModeUntil <= now {
+            self.tapSafeModeUntil = nil
+            tapFailureDates.removeAll()
+            return true
+        }
+        setStatus(.failed(
+            "Shorty paused the keyboard tap after repeated startup failures. Check Accessibility permission, then try again in a few minutes."
+        ))
+        return false
+    }
+
+    private func recordTapStartFailure(now: Date = Date()) {
+        tapFailureDates = tapFailureDates.filter {
+            now.timeIntervalSince($0) <= tapFailureWindow
+        }
+        tapFailureDates.append(now)
+
+        if tapFailureDates.count >= tapFailureLimit {
+            tapSafeModeUntil = now.addingTimeInterval(tapSafeModeDuration)
+            eventTap.isEnabled = false
+            setStatus(.failed(
+                "Shorty paused the keyboard tap after repeated startup failures. Check Accessibility permission, then try again in five minutes."
+            ))
+            return
+        }
+
+        setStatus(.failed(
+            "Could not install the keyboard tap. Check Accessibility permission and try again."
+        ))
+    }
+
+    private func clearTapStartFailures() {
+        tapFailureDates.removeAll()
+        tapSafeModeUntil = nil
     }
 
     // MARK: - Convenience
@@ -634,6 +970,24 @@ public final class ShortcutEngine: ObservableObject {
             return UpdateStatus.defaultSourceURL
         }
         return URL(string: "https://github.com/peyton/shorty/releases/tag/v\(version)")
+    }
+
+    private static var relativeTimeFormatter: RelativeDateTimeFormatter {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }
+
+    private static func distributionMode() -> String {
+#if DEBUG
+        return "Debug"
+#else
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? ""
+        if bundleIdentifier.contains("appstore") {
+            return "App Store candidate"
+        }
+        return "Direct download"
+#endif
     }
 
     private static func currentLaunchAtLoginStatus() -> LaunchAtLoginStatus {

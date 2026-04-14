@@ -271,6 +271,7 @@ private struct ScreenshotFixtures {
             adapterGenerationMessage: "Generated 6 mappings for Things. Review before saving.",
             generatedAdapterPreview: nil,
             generatedAdapterReview: nil,
+            adapterRevisions: [],
             versionBuild: "1.0.0 (1)",
             engineStatus: "Shorty is active",
             accessibilityStatus: "Granted",
@@ -291,6 +292,8 @@ private struct ScreenshotFixtures {
                 detail: "Updates are ready for signed direct-download builds."
             ),
             firstRunComplete: true,
+            globalPauseUntil: nil,
+            feedbackMessage: nil,
             diagnostics: RuntimeDiagnosticSnapshot(
                 engineStatus: "Shorty is active",
                 permissionState: .granted,
@@ -310,6 +313,7 @@ private struct ScreenshotFixtures {
                 eventsPassedThrough: 21,
                 menuActionsInvoked: 4,
                 accessibilityActionsInvoked: 0,
+                contextGuardsApplied: 0,
                 adapterValidationMessages: []
             ),
             displayStatus: EngineDisplayStatus.make(
@@ -348,6 +352,7 @@ private struct ScreenshotFixtures {
             eventsPassedThrough: 21,
             menuActionsInvoked: 4,
             accessibilityActionsInvoked: 0,
+            contextGuardsApplied: 0,
             validationMessages: [],
             adapterGenerationMessage: nil,
             hasGeneratedAdapterPreview: false
@@ -378,6 +383,7 @@ private struct ScreenshotFixtures {
             eventsPassedThrough: 0,
             menuActionsInvoked: 0,
             accessibilityActionsInvoked: 0,
+            contextGuardsApplied: 0,
             validationMessages: [],
             adapterGenerationMessage: nil,
             hasGeneratedAdapterPreview: false
@@ -408,6 +414,7 @@ private struct ScreenshotFixtures {
             eventsPassedThrough: 21,
             menuActionsInvoked: 4,
             accessibilityActionsInvoked: 0,
+            contextGuardsApplied: 0,
             validationMessages: [],
             adapterGenerationMessage: nil,
             hasGeneratedAdapterPreview: false
@@ -438,6 +445,7 @@ private struct ScreenshotFixtures {
             eventsPassedThrough: 21,
             menuActionsInvoked: 4,
             accessibilityActionsInvoked: 0,
+            contextGuardsApplied: 0,
             validationMessages: [],
             adapterGenerationMessage: "No matching shortcuts were found in Acme Notes.",
             hasGeneratedAdapterPreview: false

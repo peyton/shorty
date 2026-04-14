@@ -36,6 +36,34 @@ final class ReleaseModelsTests: XCTestCase {
         XCTAssertTrue(conflicts.contains { $0.shortcutIDs == ["newline_in_field"] })
     }
 
+    func testShortcutProfilePersistsCustomizationState() throws {
+        var profile = UserShortcutProfile.releaseDefault
+        profile.setShortcut("focus_url_bar", enabled: false)
+        profile.setAdapter("com.example.App", enabled: false)
+        profile.setMapping(
+            adapterID: "com.example.App",
+            canonicalID: "new_window",
+            enabled: false
+        )
+        profile.updateShortcut(
+            "spotlight_search",
+            keyCombo: try XCTUnwrap(KeyCombo(from: "cmd+shift+k"))
+        )
+
+        let decoded = try UserShortcutProfile.decode(from: profile.encodedJSON())
+
+        XCTAssertFalse(decoded.isShortcutEnabled("focus_url_bar"))
+        XCTAssertFalse(decoded.isAdapterEnabled("com.example.App"))
+        XCTAssertFalse(decoded.isMappingEnabled(
+            adapterID: "com.example.App",
+            canonicalID: "new_window"
+        ))
+        XCTAssertEqual(
+            decoded.shortcuts.first { $0.id == "spotlight_search" }?.defaultKeys,
+            KeyCombo(from: "cmd+shift+k")
+        )
+    }
+
     func testSupportBundleEncodesStableJSON() throws {
         let diagnostics = RuntimeDiagnosticSnapshot(
             engineStatus: "Shorty is active",
@@ -137,12 +165,45 @@ final class ReleaseModelsTests: XCTestCase {
         counters.recordKeyDownEvent()
         counters.recordResolvedAction(.remap(KeyCombo(from: "cmd+k")!))
         counters.recordResolvedAction(.invokeMenu("New Window"))
+        counters.recordAsyncActionResult(kind: .menuInvoke, succeeded: false)
+        counters.recordContextGuard()
 
         XCTAssertEqual(counters.keyDownEventsSeen, 2)
         XCTAssertEqual(counters.shortcutsMatched, 2)
         XCTAssertEqual(counters.eventsRemapped, 1)
         XCTAssertEqual(counters.menuActionsInvoked, 1)
-        XCTAssertEqual(counters.eventsPassedThrough, 0)
+        XCTAssertEqual(counters.menuActionsFailed, 1)
+        XCTAssertEqual(counters.eventsPassedThrough, 1)
+        XCTAssertEqual(counters.contextGuardsApplied, 1)
+    }
+
+    func testAppMonitorExpiresStaleBrowserContext() {
+        let monitor = AppMonitor()
+        monitor.updateActiveApplication(
+            bundleIdentifier: "com.google.Chrome",
+            localizedName: "Google Chrome",
+            processIdentifier: 401
+        )
+        monitor.updateBrowserContext(domain: "workspace.slack.com", source: .chromeBridge)
+
+        XCTAssertEqual(monitor.snapshot().effectiveAppID, "web:slack.com")
+        XCTAssertTrue(monitor.expireStaleBrowserContext(
+            now: Date().addingTimeInterval(AppMonitor.browserContextExpirationInterval + 1)
+        ))
+        XCTAssertNil(monitor.webAppDomain)
+        XCTAssertEqual(monitor.effectiveAppID, "com.google.Chrome")
+    }
+
+    func testAdapterMappingDecodesLegacyPayloadWithDefaults() throws {
+        let payload = Data(
+            #"{"canonicalID":"new_window","method":"menuInvoke","menuTitle":"New Window"}"#.utf8
+        )
+
+        let mapping = try JSONDecoder().decode(Adapter.Mapping.self, from: payload)
+
+        XCTAssertTrue(mapping.isEnabled)
+        XCTAssertNil(mapping.menuPath)
+        XCTAssertNil(mapping.matchReason)
     }
 
     func testBridgeInstallManagerReportsInstalledManifest() throws {
@@ -275,6 +336,35 @@ final class ReleaseModelsTests: XCTestCase {
         XCTAssertFalse(bundle.summary.bridgeInstallStatuses.isEmpty)
         XCTAssertEqual(bundle.summary.activeAvailability.state, .available)
         XCTAssertEqual(bundle.summary.activeAvailability.adapterIdentifier, "web:docs.google.com")
+    }
+
+    func testShortcutEngineLoadsPersistedAdapterRevisions() throws {
+        let suiteName = "ShortyTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let adapter = Adapter(
+            appIdentifier: "com.example.persisted-adapter",
+            appName: "Persisted Adapter",
+            source: .user,
+            mappings: [.init(canonicalID: "new_window", method: .passthrough)]
+        )
+        let revision = AdapterRevision(
+            adapterIdentifier: adapter.appIdentifier,
+            summary: "Imported user adapter.",
+            adapter: adapter
+        )
+        defaults.set(
+            try JSONEncoder().encode([revision]),
+            forKey: ShortcutEngine.adapterRevisionsDefaultsKey
+        )
+
+        let engine = ShortcutEngine(
+            userDefaults: defaults,
+            safariExtensionUserDefaults: defaults
+        )
+
+        XCTAssertEqual(engine.adapterRevisions.count, 1)
+        XCTAssertEqual(engine.adapterRevisions.first?.adapterIdentifier, adapter.appIdentifier)
     }
 
     func testGeneratedAdapterReviewFlagsLowCoverageAndRiskyMappings() throws {

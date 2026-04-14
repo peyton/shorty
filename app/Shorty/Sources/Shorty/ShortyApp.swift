@@ -3,8 +3,16 @@ import ShortyCore
 import SwiftUI
 
 final class ShortyAppDelegate: NSObject, NSApplicationDelegate {
-    let engine = ShortcutEngine()
+    let engine = ShortcutEngine(configuration: ShortyAppDelegate.appConfiguration)
     private var didOpenFirstRunSettings = false
+
+    private static var appConfiguration: EngineConfiguration {
+#if SHORTY_APP_STORE
+        return .appStoreCandidate
+#else
+        return .releaseDefault
+#endif
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -14,6 +22,10 @@ final class ShortyAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         engine.stop()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        engine.refreshDailyStatuses()
     }
 
     private func openFirstRunSettingsIfNeeded() {
