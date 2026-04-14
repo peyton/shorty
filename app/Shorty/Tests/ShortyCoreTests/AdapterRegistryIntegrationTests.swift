@@ -115,6 +115,24 @@ final class AdapterRegistryIntegrationTests: XCTestCase {
         )
     }
 
+    func testAdapterValidationRejectsWhitespaceInAppIdentifier() {
+        let adapter = Adapter(
+            appIdentifier: " com.shorty.invalid.fixture ",
+            appName: "Invalid Fixture",
+            source: .user,
+            mappings: [
+                .init(canonicalID: "select_all", method: .passthrough)
+            ]
+        )
+
+        XCTAssertThrowsError(try AdapterRegistry.validate(adapter: adapter)) { error in
+            XCTAssertEqual(
+                error as? AdapterValidationError,
+                .invalidAppIdentifier(" com.shorty.invalid.fixture ")
+            )
+        }
+    }
+
     func testSavingUserAdapterUsesSafeFilenameAndUpdatesResolver() throws {
         let appSupport = temporaryDirectory()
         let registry = AdapterRegistry(appSupportDirectory: appSupport)

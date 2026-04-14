@@ -44,6 +44,22 @@ final class KeyComboTests: XCTestCase {
         XCTAssertTrue(combo!.modifiers.contains(.control))
     }
 
+    func testParserTrimsWhitespace() {
+        XCTAssertEqual(
+            KeyCombo(from: " cmd + shift + k "),
+            KeyCombo(from: "cmd+shift+k")
+        )
+    }
+
+    func testParserRejectsAmbiguousMultipleKeys() {
+        XCTAssertNil(KeyCombo(from: "cmd+k+x"))
+    }
+
+    func testParserRejectsEmptyParts() {
+        XCTAssertNil(KeyCombo(from: "cmd++k"))
+        XCTAssertNil(KeyCombo(from: "cmd+"))
+    }
+
     // MARK: - KeyCodeMap
 
     func testKeyCodeMapRoundTrip() {
@@ -262,6 +278,23 @@ final class KeyComboTests: XCTestCase {
         )
     }
 
+    func testDomainNormalizerAcceptsURLsAndPorts() {
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(
+                for: "https://www.figma.com/file/abc?node-id=1"
+            ),
+            "web:figma.com"
+        )
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(for: "workspace.slack.com:443/path"),
+            "web:slack.com"
+        )
+        XCTAssertEqual(
+            DomainNormalizer.adapterIdentifier(for: "HTTPS://MAIL.GOOGLE.COM:443/u/0/#inbox"),
+            "web:mail.google.com"
+        )
+    }
+
     func testDomainNormalizerUnknownDomain() {
         XCTAssertEqual(
             DomainNormalizer.adapterIdentifier(for: "Example.COM."),
@@ -324,6 +357,23 @@ final class KeyComboTests: XCTestCase {
         XCTAssertEqual(
             BrowserBridge.readExactly(from: descriptors[0], count: payload.count),
             payload
+        )
+    }
+
+    func testBrowserBridgeReadExactlyTimesOutWithoutData() {
+        var descriptors = [Int32](repeating: 0, count: 2)
+        XCTAssertEqual(pipe(&descriptors), 0)
+        defer {
+            close(descriptors[0])
+            close(descriptors[1])
+        }
+
+        XCTAssertNil(
+            BrowserBridge.readExactly(
+                from: descriptors[0],
+                count: 1,
+                timeoutMilliseconds: 1
+            )
         )
     }
 

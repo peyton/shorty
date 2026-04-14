@@ -83,12 +83,20 @@ public final class BrowserBridge: ObservableObject {
 
     public static func readExactly(
         from fileDescriptor: Int32,
-        count: Int
+        count: Int,
+        timeoutMilliseconds: Int32 = 30_000
     ) -> Data? {
         var data = Data(count: count)
         var totalRead = 0
 
         while totalRead < count {
+            guard waitForReadable(
+                fileDescriptor: fileDescriptor,
+                timeoutMilliseconds: timeoutMilliseconds
+            ) else {
+                return nil
+            }
+
             let bytesRead = data.withUnsafeMutableBytes { buffer in
                 guard let baseAddress = buffer.baseAddress else {
                     return -1
@@ -114,6 +122,32 @@ public final class BrowserBridge: ObservableObject {
         }
 
         return data
+    }
+
+    private static func waitForReadable(
+        fileDescriptor: Int32,
+        timeoutMilliseconds: Int32
+    ) -> Bool {
+        var pollDescriptor = pollfd(
+            fd: fileDescriptor,
+            events: Int16(POLLIN),
+            revents: 0
+        )
+
+        while true {
+            let result = poll(&pollDescriptor, 1, timeoutMilliseconds)
+            if result > 0 {
+                return pollDescriptor.revents & Int16(POLLIN) != 0
+                    || pollDescriptor.revents & Int16(POLLHUP) != 0
+            }
+            if result == 0 {
+                return false
+            }
+            if errno == EINTR {
+                continue
+            }
+            return false
+        }
     }
 
     public static func writeAll(_ data: Data, to fileDescriptor: Int32) -> Bool {

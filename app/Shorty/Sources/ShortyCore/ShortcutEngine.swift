@@ -357,10 +357,31 @@ public final class ShortcutEngine: ObservableObject {
     }
 
     public func supportBundle() -> SupportBundle {
-        SupportBundle(
+        let adapters = registry.allAdapters
+        let adapterIDs = adapters.map(\.appIdentifier).sorted()
+        let adapterCountsBySource = Dictionary(
+            grouping: adapters,
+            by: { $0.source.rawValue }
+        ).mapValues(\.count)
+        let activeAvailability = registry.availability(
+            for: appMonitor.effectiveAppID,
+            displayName: appMonitor.currentAppName
+        )
+
+        return SupportBundle(
+            summary: SupportBundleSummary(
+                appVersion: updateStatus.currentVersion,
+                updateStatus: updateStatus,
+                launchAtLoginStatus: launchAtLoginStatus,
+                adapterCount: adapterIDs.count,
+                adapterCountsBySource: adapterCountsBySource,
+                supportedWebDomains: DomainNormalizer.supportedWebAppDomains.sorted(),
+                validationWarningCount: registry.validationMessages.count,
+                activeAvailability: activeAvailability
+            ),
             diagnostics: diagnosticSnapshot(),
             shortcutProfile: shortcutProfile,
-            adapters: registry.allAdapters.map(\.appIdentifier).sorted(),
+            adapters: adapterIDs,
             notes: shortcutProfile.conflicts().map(\.message)
         )
     }

@@ -397,8 +397,44 @@ public struct RuntimeDiagnosticSnapshot: Codable, Equatable {
     }
 }
 
+public struct SupportBundleSummary: Codable, Equatable {
+    public let appVersion: String
+    public let updateStatus: UpdateStatus
+    public let launchAtLoginStatus: LaunchAtLoginStatus
+    public let adapterCount: Int
+    public let adapterCountsBySource: [String: Int]
+    public let supportedWebDomains: [String]
+    public let validationWarningCount: Int
+    public let activeAvailability: ShortcutAvailability
+
+    public init(
+        appVersion: String = "Unknown",
+        updateStatus: UpdateStatus = UpdateStatus(),
+        launchAtLoginStatus: LaunchAtLoginStatus = LaunchAtLoginStatus(),
+        adapterCount: Int = 0,
+        adapterCountsBySource: [String: Int] = [:],
+        supportedWebDomains: [String] = [],
+        validationWarningCount: Int = 0,
+        activeAvailability: ShortcutAvailability = ShortcutAvailability(
+            state: .noActiveApp,
+            appIdentifier: nil,
+            appDisplayName: "Unknown"
+        )
+    ) {
+        self.appVersion = appVersion
+        self.updateStatus = updateStatus
+        self.launchAtLoginStatus = launchAtLoginStatus
+        self.adapterCount = adapterCount
+        self.adapterCountsBySource = adapterCountsBySource
+        self.supportedWebDomains = supportedWebDomains
+        self.validationWarningCount = validationWarningCount
+        self.activeAvailability = activeAvailability
+    }
+}
+
 public struct SupportBundle: Codable, Equatable {
     public let createdAt: Date
+    public let summary: SupportBundleSummary
     public let diagnostics: RuntimeDiagnosticSnapshot
     public let shortcutProfile: UserShortcutProfile
     public let adapters: [String]
@@ -406,12 +442,14 @@ public struct SupportBundle: Codable, Equatable {
 
     public init(
         createdAt: Date = Date(),
+        summary: SupportBundleSummary? = nil,
         diagnostics: RuntimeDiagnosticSnapshot,
         shortcutProfile: UserShortcutProfile,
         adapters: [String],
         notes: [String] = []
     ) {
         self.createdAt = createdAt
+        self.summary = summary ?? SupportBundleSummary(adapterCount: adapters.count)
         self.diagnostics = diagnostics
         self.shortcutProfile = shortcutProfile
         self.adapters = adapters
