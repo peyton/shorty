@@ -40,6 +40,10 @@ uninstall-browser-bridge BROWSERS='chrome':
     browsers="{{BROWSERS}}"; browsers="${browsers#BROWSERS=}"; bash scripts/tooling/install_browser_bridge.sh --uninstall --browsers "$browsers"
 
 [group('release')]
+doctor:
+    bash scripts/tooling/doctor.sh
+
+[group('release')]
 release-preflight VERSION='local':
     version="{{VERSION}}"; version="${version#VERSION=}"; bash scripts/tooling/release_preflight.sh --version "$version"
 

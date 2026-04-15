@@ -22,6 +22,19 @@ from scripts.tooling.browser_manifest import (
     uninstall_manifests,
     validate_extension_id,
 )
+from scripts.tooling.doctor import (
+    CheckResult,
+    DoctorReport,
+    Status,
+    check_codesign_identity,
+    check_entitlement_file,
+    check_notarization_credentials,
+    check_team_id,
+    check_testflight_credentials,
+    check_version_file,
+    format_report,
+    run_doctor,
+)
 from scripts.tooling.legal_resources import (
     LegalResourceError,
     validate_bundled_legal_resources,
@@ -558,3 +571,207 @@ def test_app_store_candidate_validation_rejects_bad_build_number(
             entitlements,
             expected_version="1.0.0",
         )
+
+
+# ---------------------------------------------------------------------------
+# Doctor checks
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_codesign_identity_checks() -> None:
+    assert check_codesign_identity({}).status == Status.FAIL
+    result = check_codesign_identity({"SHORTY_CODESIGN_IDENTITY": ""})
+    assert result.status == Status.FAIL
+
+    result = check_codesign_identity({"SHORTY_CODESIGN_IDENTITY": "-"})
+    assert result.status == Status.WARN
+
+    result = check_codesign_identity(
+        {"SHORTY_CODESIGN_IDENTITY": "Developer ID Application: Test (ABC123)"}
+    )
+    assert result.status == Status.PASS
+
+
+def test_doctor_team_id_checks() -> None:
+    assert check_team_id({}).status == Status.FAIL
+    assert check_team_id({"TEAM_ID": ""}).status == Status.FAIL
+    assert check_team_id({"TEAM_ID": "3VDQ4656LX"}).status == Status.PASS
+
+
+def test_doctor_version_file_checks(tmp_path: Path) -> None:
+    assert check_version_file(tmp_path).status == Status.FAIL
+
+    (tmp_path / "VERSION").write_text("invalid\n", encoding="utf-8")
+    assert check_version_file(tmp_path).status == Status.FAIL
+
+    (tmp_path / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+    result = check_version_file(tmp_path)
+    assert result.status == Status.PASS
+    assert result.message == "1.0.0"
+
+
+def test_doctor_entitlement_file_checks(tmp_path: Path) -> None:
+    ent_dir = tmp_path / "app" / "Shorty"
+    ent_dir.mkdir(parents=True)
+
+    result = check_entitlement_file(
+        "Shorty.entitlements",
+        "Developer ID signing",
+        entitlements_dir=ent_dir,
+        repo_root=tmp_path,
+    )
+    assert result.status == Status.FAIL
+
+    ent_path = ent_dir / "Shorty.entitlements"
+    ent_path.write_bytes(
+        plistlib.dumps(
+            {"com.apple.security.application-groups": ["group.app.peyton.shorty"]}
+        )
+    )
+    result = check_entitlement_file(
+        "Shorty.entitlements",
+        "Developer ID signing",
+        entitlements_dir=ent_dir,
+        repo_root=tmp_path,
+    )
+    assert result.status == Status.PASS
+
+
+def test_doctor_app_store_entitlements_require_sandbox(tmp_path: Path) -> None:
+    ent_dir = tmp_path / "app" / "Shorty"
+    ent_dir.mkdir(parents=True)
+
+    ent_path = ent_dir / "ShortyAppStore.entitlements"
+    ent_path.write_bytes(
+        plistlib.dumps(
+            {"com.apple.security.application-groups": ["group.app.peyton.shorty"]}
+        )
+    )
+    result = check_entitlement_file(
+        "ShortyAppStore.entitlements",
+        "App Store / TestFlight builds",
+        entitlements_dir=ent_dir,
+        repo_root=tmp_path,
+    )
+    assert result.status == Status.FAIL
+    assert "Sandbox" in result.message
+
+    ent_path.write_bytes(
+        plistlib.dumps(
+            {
+                "com.apple.security.app-sandbox": True,
+                "com.apple.security.application-groups": ["group.app.peyton.shorty"],
+            }
+        )
+    )
+    result = check_entitlement_file(
+        "ShortyAppStore.entitlements",
+        "App Store / TestFlight builds",
+        entitlements_dir=ent_dir,
+        repo_root=tmp_path,
+    )
+    assert result.status == Status.PASS
+
+
+def test_doctor_notarization_credentials_checks(tmp_path: Path) -> None:
+    assert check_notarization_credentials({}).status == Status.FAIL
+
+    result = check_notarization_credentials({"NOTARYTOOL_PROFILE": "my-profile"})
+    assert result.status == Status.PASS
+
+    result = check_notarization_credentials(
+        {
+            "SHORTY_APP_STORE_CONNECT_KEY_ID": "ABC123",
+            "SHORTY_APP_STORE_CONNECT_ISSUER_ID": "uuid-here",
+        }
+    )
+    assert result.status == Status.FAIL
+    assert "SHORTY_APP_STORE_CONNECT_KEY_PATH" in result.message
+
+    key_file = tmp_path / "AuthKey_ABC123.p8"
+    key_file.write_text("fake-key", encoding="utf-8")
+    result = check_notarization_credentials(
+        {
+            "SHORTY_APP_STORE_CONNECT_KEY_PATH": str(key_file),
+            "SHORTY_APP_STORE_CONNECT_KEY_ID": "ABC123",
+            "SHORTY_APP_STORE_CONNECT_ISSUER_ID": "uuid-here",
+        }
+    )
+    assert result.status == Status.PASS
+
+    result = check_notarization_credentials(
+        {
+            "SHORTY_APP_STORE_CONNECT_KEY_PATH": "/nonexistent/key.p8",
+            "SHORTY_APP_STORE_CONNECT_KEY_ID": "ABC123",
+            "SHORTY_APP_STORE_CONNECT_ISSUER_ID": "uuid-here",
+        }
+    )
+    assert result.status == Status.FAIL
+    assert "not found" in result.message
+
+
+def test_doctor_testflight_credentials_checks() -> None:
+    assert check_testflight_credentials({}).status == Status.FAIL
+
+    result = check_testflight_credentials(
+        {
+            "SHORTY_APP_STORE_CONNECT_KEY_PATH": "/some/key.p8",
+            "SHORTY_APP_STORE_CONNECT_KEY_ID": "ABC123",
+            "SHORTY_APP_STORE_CONNECT_ISSUER_ID": "uuid-here",
+        }
+    )
+    assert result.status == Status.PASS
+    assert "auto-managed" in result.message
+
+    result = check_testflight_credentials({"SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING": "1"})
+    assert result.status == Status.WARN
+
+
+def test_doctor_run_produces_complete_report(tmp_path: Path) -> None:
+    (tmp_path / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+    ent_dir = tmp_path / "app" / "Shorty"
+    ent_dir.mkdir(parents=True)
+    for name in (
+        "Shorty.entitlements",
+        "ShortySafariWebExtension.entitlements",
+    ):
+        (ent_dir / name).write_bytes(
+            plistlib.dumps(
+                {"com.apple.security.application-groups": ["group.app.peyton.shorty"]}
+            )
+        )
+    (ent_dir / "ShortyAppStore.entitlements").write_bytes(
+        plistlib.dumps(
+            {
+                "com.apple.security.app-sandbox": True,
+                "com.apple.security.application-groups": ["group.app.peyton.shorty"],
+            }
+        )
+    )
+
+    env = {"TEAM_ID": "3VDQ4656LX", "NOTARYTOOL_PROFILE": "test-profile"}
+    report = run_doctor(env=env, repo_root=tmp_path)
+
+    section_titles = [title for title, _ in report.sections]
+    assert "General" in section_titles
+    assert "Entitlements" in section_titles
+    assert "Developer ID Signing" in section_titles
+    assert "Notarization" in section_titles
+    assert "TestFlight / App Store" in section_titles
+
+
+def test_doctor_format_report_includes_all_sections() -> None:
+    report = DoctorReport()
+    report.begin_section("Test Section")
+    report.add(CheckResult("test-check", Status.PASS, "OK"))
+    report.begin_section("Another Section")
+    report.add(CheckResult("fail-check", Status.FAIL, "Bad", "Fix it"))
+
+    output = format_report(report)
+    assert "Test Section" in output
+    assert "Another Section" in output
+    assert "test-check" in output
+    assert "fail-check" in output
+    assert "Fix it" in output
+    assert "1 failed" in output
+    assert "1 passed" in output
