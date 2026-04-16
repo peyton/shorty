@@ -26,14 +26,14 @@ enum SettingsSearchIndex {
         adapters: [Adapter]
     ) -> [SettingsSearchResult] {
         guard !query.isEmpty else { return [] }
-        let q = query.lowercased()
+        let normalizedQuery = query.lowercased()
         var results: [SettingsSearchResult] = []
 
         for shortcut in shortcuts {
-            if shortcut.name.lowercased().contains(q)
-                || shortcut.description.lowercased().contains(q)
-                || shortcut.id.lowercased().contains(q)
-                || shortcut.defaultKeys.displayString.lowercased().contains(q) {
+            if shortcut.name.lowercased().contains(normalizedQuery)
+                || shortcut.description.lowercased().contains(normalizedQuery)
+                || shortcut.id.lowercased().contains(normalizedQuery)
+                || shortcut.defaultKeys.displayString.lowercased().contains(normalizedQuery) {
                 results.append(SettingsSearchResult(
                     id: "shortcut-\(shortcut.id)",
                     title: shortcut.name,
@@ -46,8 +46,8 @@ enum SettingsSearchIndex {
         }
 
         for adapter in adapters {
-            if adapter.appName.lowercased().contains(q)
-                || adapter.appIdentifier.lowercased().contains(q) {
+            if adapter.appName.lowercased().contains(normalizedQuery)
+                || adapter.appIdentifier.lowercased().contains(normalizedQuery) {
                 results.append(SettingsSearchResult(
                     id: "adapter-\(adapter.appIdentifier)",
                     title: adapter.appName,
@@ -59,9 +59,9 @@ enum SettingsSearchIndex {
             }
 
             for mapping in adapter.mappings {
-                if mapping.canonicalID.lowercased().contains(q)
-                    || (mapping.menuTitle?.lowercased().contains(q) ?? false)
-                    || (mapping.nativeKeys?.displayString.lowercased().contains(q) ?? false) {
+                if mapping.canonicalID.lowercased().contains(normalizedQuery)
+                    || (mapping.menuTitle?.lowercased().contains(normalizedQuery) ?? false)
+                    || (mapping.nativeKeys?.displayString.lowercased().contains(normalizedQuery) ?? false) {
                     results.append(SettingsSearchResult(
                         id: "mapping-\(adapter.appIdentifier)-\(mapping.canonicalID)",
                         title: "\(mapping.canonicalID) in \(adapter.appName)",
@@ -83,11 +83,12 @@ enum SettingsSearchIndex {
             ("Export Support Bundle", "Diagnostics for troubleshooting", .advanced),
             ("App Coverage", "Scan installed apps for adapter coverage", .adapters),
             ("Translation Sound", "Audio feedback for shortcut translation", .advanced),
-            ("Weekly Digest", "Weekly summary notification", .advanced),
+            ("Weekly Digest", "Weekly summary notification", .advanced)
         ]
 
         for (name, detail, tab) in settingNames {
-            if name.lowercased().contains(q) || detail.lowercased().contains(q) {
+            if name.lowercased().contains(normalizedQuery)
+                || detail.lowercased().contains(normalizedQuery) {
                 results.append(SettingsSearchResult(
                     id: "setting-\(name)",
                     title: name,
