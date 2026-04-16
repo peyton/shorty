@@ -7,6 +7,7 @@ import UserNotifications
 final class ShortyAppDelegate: NSObject, NSApplicationDelegate {
     let engine = ShortcutEngine(configuration: ShortyAppDelegate.appConfiguration)
     private var didOpenFirstRunSettings = false
+    private lazy var settingsWindowPresenter = SettingsWindowPresenter(engine: engine)
 
     private static var appConfiguration: EngineConfiguration {
 #if SHORTY_APP_STORE
@@ -34,13 +35,20 @@ final class ShortyAppDelegate: NSObject, NSApplicationDelegate {
         engine.refreshDailyStatuses()
     }
 
+    @objc func showSettingsWindow(_ sender: Any?) {
+        showSettingsWindow()
+    }
+
+    func showSettingsWindow() {
+        settingsWindowPresenter.show()
+    }
+
     private func openFirstRunSettingsIfNeeded() {
         guard !didOpenFirstRunSettings, !engine.isFirstRunComplete else { return }
         didOpenFirstRunSettings = true
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.showSettingsWindow()
         }
     }
 
@@ -85,7 +93,10 @@ struct ShortyApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            StatusBarView(engine: appDelegate.engine)
+            StatusBarView(
+                engine: appDelegate.engine,
+                openSettingsWindow: { appDelegate.showSettingsWindow() }
+            )
                 .tint(ShortyBrand.teal)
         } label: {
             StatusIconView(engine: appDelegate.engine)

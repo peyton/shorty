@@ -106,6 +106,32 @@ final class StatusBarPopoverTests: XCTestCase {
         XCTAssertFalse(presentation.shortcuts.showsResumeAction)
     }
 
+    func testLiveSettingsActionUsesInjectedWindowOpener() {
+        let engine = makeEngine()
+        var didOpenSettings = false
+        let actions = StatusBarActions.live(
+            engine: engine,
+            openSettingsWindow: { didOpenSettings = true }
+        )
+
+        actions.openSettings()
+
+        XCTAssertTrue(didOpenSettings)
+    }
+
+    func testAddCurrentAppActionOpensSettingsWindow() {
+        let engine = makeEngine()
+        var didOpenSettings = false
+        let actions = StatusBarActions.live(
+            engine: engine,
+            openSettingsWindow: { didOpenSettings = true }
+        )
+
+        actions.addCurrentApp()
+
+        XCTAssertTrue(didOpenSettings)
+    }
+
     private func makeEngine() -> ShortcutEngine {
         let suiteName = "ShortyPopoverTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

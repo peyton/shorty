@@ -61,8 +61,8 @@ struct AppCoverageView: View {
                     TextField("Search apps...", text: $searchText)
                         .textFieldStyle(.roundedBorder)
                     Picker("Filter", selection: $filter) {
-                        ForEach(CoverageFilter.allCases, id: \.self) { f in
-                            Text(f.rawValue).tag(f)
+                        ForEach(CoverageFilter.allCases, id: \.self) { filter in
+                            Text(filter.rawValue).tag(filter)
                         }
                     }
                     .pickerStyle(.segmented)

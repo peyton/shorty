@@ -7,9 +7,14 @@ struct StatusBarView: View {
     @StateObject private var snapshotStore: StatusBarSnapshotStore
     @ObservedObject private var translationFeed: TranslationFeed
     private let engine: ShortcutEngine
+    private let openSettingsWindow: () -> Void
 
-    init(engine: ShortcutEngine) {
+    init(
+        engine: ShortcutEngine,
+        openSettingsWindow: @escaping () -> Void
+    ) {
         self.engine = engine
+        self.openSettingsWindow = openSettingsWindow
         _snapshotStore = StateObject(
             wrappedValue: StatusBarSnapshotStore(engine: engine)
         )
@@ -20,7 +25,10 @@ struct StatusBarView: View {
         StatusBarContentView(
             snapshot: snapshotStore.snapshot,
             eventTapEnabled: eventTapEnabledBinding,
-            actions: .live(engine: engine),
+            actions: .live(
+                engine: engine,
+                openSettingsWindow: openSettingsWindow
+            ),
             recentTranslations: translationFeed.recentEvents,
             dailyStats: translationFeed.dailyStats,
             compactMode: engine.persistedSettings.compactPopoverMode
@@ -277,18 +285,17 @@ struct StatusBarActions {
         quit: {}
     )
 
-    static func live(engine: ShortcutEngine) -> StatusBarActions {
+    static func live(
+        engine: ShortcutEngine,
+        openSettingsWindow: @escaping () -> Void
+    ) -> StatusBarActions {
         StatusBarActions(
             openAccessibilitySettings: { engine.openAccessibilitySettings() },
             addCurrentApp: {
                 engine.generateAdapterForCurrentApp()
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                NSApp.activate(ignoringOtherApps: true)
+                openSettingsWindow()
             },
-            openSettings: {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                NSApp.activate(ignoringOtherApps: true)
-            },
+            openSettings: openSettingsWindow,
             pauseCurrentApp: { engine.pauseCurrentApp() },
             resumeCurrentApp: { engine.resumeCurrentApp() },
             pauseFor15Minutes: { engine.pauseForDuration(15 * 60) },
