@@ -71,11 +71,17 @@ CI_SECRETS: list[tuple[str, str]] = [
     ),
     (
         "SHORTY_MAC_INSTALLER_DISTRIBUTION_CERTIFICATE_PEM",
-        "Optional for manual TestFlight export: Mac Installer Distribution certificate PEM",
+        (
+            "Optional for manual TestFlight export: "
+            "Mac Installer Distribution certificate PEM"
+        ),
     ),
     (
         "SHORTY_MAC_INSTALLER_DISTRIBUTION_PRIVATE_KEY_PEM",
-        "Optional for manual TestFlight export: Mac Installer Distribution private key PEM",
+        (
+            "Optional for manual TestFlight export: "
+            "Mac Installer Distribution private key PEM"
+        ),
     ),
     (
         "SHORTY_MAC_INSTALLER_DISTRIBUTION_PRIVATE_KEY_PASSWORD",
@@ -404,7 +410,13 @@ def check_testflight_credentials(env: dict[str, str]) -> CheckResult:
         app_profile_secret and extension_profile_secret
     )
 
-    if allow_local and (key_path or api_key_raw) and key_id and issuer_id and has_profiles:
+    if (
+        allow_local
+        and (key_path or api_key_raw)
+        and key_id
+        and issuer_id
+        and has_profiles
+    ):
         source = "file path" if key_path else "raw SHORTY_APP_STORE_CONNECT_API_KEY_P8"
         return CheckResult(
             "TestFlight credentials",
