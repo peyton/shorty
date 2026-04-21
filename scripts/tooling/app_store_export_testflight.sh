@@ -72,6 +72,8 @@ cat >"$export_options" <<EOF
   <false/>
   <key>method</key>
   <string>app-store-connect</string>
+  <key>signingStyle</key>
+  <string>automatic</string>
   <key>teamID</key>
   <string>${TEAM_ID}</string>
   <key>testFlightInternalTestingOnly</key>
