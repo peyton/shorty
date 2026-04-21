@@ -105,23 +105,24 @@ write_secret_file "$SHORTY_APP_STORE_CONNECT_API_KEY_P8" "$app_store_key_path"
 security create-keychain -p "$SHORTY_CI_KEYCHAIN_PASSWORD" "$keychain_path"
 security set-keychain-settings -lut 21600 "$keychain_path"
 security unlock-keychain -p "$SHORTY_CI_KEYCHAIN_PASSWORD" "$keychain_path"
-security import "$certificate_path" \
-  -A \
-  -t cert \
-  -f pemseq \
-  -k "$keychain_path"
-
-private_key_import_args=(
-  "$private_key_path"
-  -A
-  -t priv
-  -f openssl
-  -k "$keychain_path"
+identity_bundle_path="$RUNNER_TEMP/shorty-developer-id-identity.p12"
+openssl_pkcs12_args=(
+  pkcs12
+  -export
+  -inkey "$private_key_path"
+  -in "$certificate_path"
+  -out "$identity_bundle_path"
+  -passout "pass:$SHORTY_CI_KEYCHAIN_PASSWORD"
 )
 if [ -n "${SHORTY_DEVELOPER_ID_PRIVATE_KEY_PASSWORD:-}" ]; then
-  private_key_import_args+=(-P "$SHORTY_DEVELOPER_ID_PRIVATE_KEY_PASSWORD")
+  openssl_pkcs12_args+=(-passin "pass:$SHORTY_DEVELOPER_ID_PRIVATE_KEY_PASSWORD")
 fi
-security import "${private_key_import_args[@]}"
+openssl "${openssl_pkcs12_args[@]}"
+security import "$identity_bundle_path" \
+  -A \
+  -P "$SHORTY_CI_KEYCHAIN_PASSWORD" \
+  -f pkcs12 \
+  -k "$keychain_path"
 
 security set-key-partition-list \
   -S apple-tool:,apple:,codesign: \
