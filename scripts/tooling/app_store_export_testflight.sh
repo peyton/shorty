@@ -67,7 +67,7 @@ cat >"$export_options" <<EOF
 <plist version="1.0">
 <dict>
   <key>destination</key>
-  <string>upload</string>
+  <string>export</string>
   <key>manageAppVersionAndBuildNumber</key>
   <false/>
   <key>method</key>
@@ -98,4 +98,51 @@ xcodebuild \
   -allowProvisioningUpdates \
   "${auth_args[@]}"
 
-printf 'Submitted TestFlight upload from %s\n' "$archive_path"
+upload_package="$(find "$export_path" -type f \( -name '*.pkg' -o -name '*.ipa' \) -print -quit)"
+if [ -z "$upload_package" ]; then
+  printf 'No App Store package (.pkg or .ipa) was exported to %s\n' "$export_path" >&2
+  exit 1
+fi
+
+if xcrun --find altool >/dev/null 2>&1; then
+  upload_log="$(mktemp "${TMPDIR:-/tmp}/shorty-altool.XXXXXX.log")"
+  trap 'rm -f "$upload_log"' EXIT
+
+  set +e
+  xcrun altool \
+    --upload-package "$upload_package" \
+    --api-key "$SHORTY_APP_STORE_CONNECT_KEY_ID" \
+    --api-issuer "$SHORTY_APP_STORE_CONNECT_ISSUER_ID" \
+    --p8-file-path "$SHORTY_APP_STORE_CONNECT_KEY_PATH" \
+    --show-progress \
+    --wait \
+    --output-format normal 2>&1 | tee "$upload_log"
+  altool_status=${PIPESTATUS[0]}
+  set -e
+
+  if [ "$altool_status" -ne 0 ] ||
+    grep -Eq '(^|[[:space:]])ERROR:|UPLOAD FAILED|Validation failed \([0-9]+\)|STATE_ERROR\.' "$upload_log"; then
+    printf 'App Store Connect upload failed for %s\n' "$upload_package" >&2
+    exit 1
+  fi
+else
+  transporter_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/shorty-transporter.XXXXXX")"
+  trap 'rm -rf "$transporter_tmp_dir"' EXIT
+
+  mkdir -p "$transporter_tmp_dir/private_keys"
+  cp "$SHORTY_APP_STORE_CONNECT_KEY_PATH" \
+    "$transporter_tmp_dir/private_keys/AuthKey_${SHORTY_APP_STORE_CONNECT_KEY_ID}.p8"
+
+  (
+    cd "$transporter_tmp_dir"
+    xcrun iTMSTransporter \
+      -m upload \
+      -assetFile "$upload_package" \
+      -apiKey "$SHORTY_APP_STORE_CONNECT_KEY_ID" \
+      -apiIssuer "$SHORTY_APP_STORE_CONNECT_ISSUER_ID" \
+      -apiKeyType team \
+      -v informational
+  )
+fi
+
+printf 'Submitted TestFlight upload package %s from archive %s\n' "$upload_package" "$archive_path"
