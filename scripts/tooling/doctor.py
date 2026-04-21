@@ -369,7 +369,9 @@ def check_testflight_credentials(env: dict[str, str]) -> CheckResult:
     key_id = env.get("SHORTY_APP_STORE_CONNECT_KEY_ID", "").strip()
     issuer_id = env.get("SHORTY_APP_STORE_CONNECT_ISSUER_ID", "").strip()
     app_profile_path = env.get("SHORTY_APP_STORE_APP_PROFILE_PATH", "").strip()
-    extension_profile_path = env.get("SHORTY_APP_STORE_EXTENSION_PROFILE_PATH", "").strip()
+    extension_profile_path = env.get(
+        "SHORTY_APP_STORE_EXTENSION_PROFILE_PATH", ""
+    ).strip()
     app_profile_secret = env.get("SHORTY_APP_STORE_APP_PROFILE", "").strip()
     extension_profile_secret = env.get("SHORTY_APP_STORE_EXTENSION_PROFILE", "").strip()
     allow_local = env.get("SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING") == "1"
