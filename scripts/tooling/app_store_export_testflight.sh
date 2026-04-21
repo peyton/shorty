@@ -93,6 +93,7 @@ xcodebuild \
   -archivePath "$archive_path" \
   -exportPath "$export_path" \
   -exportOptionsPlist "$export_options" \
+  -allowProvisioningUpdates \
   "${auth_args[@]}"
 
 printf 'Submitted TestFlight upload from %s\n' "$archive_path"
