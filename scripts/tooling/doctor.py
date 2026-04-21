@@ -48,6 +48,16 @@ CI_SECRETS: list[tuple[str, str]] = [
         "app.peyton.shorty.SafariWebExtension",
     ),
     (
+        "SHORTY_APP_STORE_APP_PROFILE",
+        "Base64 profileContent (recommended) or raw provisioning profile for "
+        "app.peyton.shorty.appstore",
+    ),
+    (
+        "SHORTY_APP_STORE_EXTENSION_PROFILE",
+        "Base64 profileContent (recommended) or raw provisioning profile for "
+        "app.peyton.shorty.appstore.SafariWebExtension",
+    ),
+    (
         "SHORTY_CI_KEYCHAIN_PASSWORD",
         "Arbitrary strong password for the CI temp keychain",
     ),
@@ -358,16 +368,37 @@ def check_testflight_credentials(env: dict[str, str]) -> CheckResult:
     api_key_raw = env.get("SHORTY_APP_STORE_CONNECT_API_KEY_P8", "").strip()
     key_id = env.get("SHORTY_APP_STORE_CONNECT_KEY_ID", "").strip()
     issuer_id = env.get("SHORTY_APP_STORE_CONNECT_ISSUER_ID", "").strip()
+    app_profile_path = env.get("SHORTY_APP_STORE_APP_PROFILE_PATH", "").strip()
+    extension_profile_path = env.get("SHORTY_APP_STORE_EXTENSION_PROFILE_PATH", "").strip()
+    app_profile_secret = env.get("SHORTY_APP_STORE_APP_PROFILE", "").strip()
+    extension_profile_secret = env.get("SHORTY_APP_STORE_EXTENSION_PROFILE", "").strip()
     allow_local = env.get("SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING") == "1"
 
-    if (key_path or api_key_raw) and key_id and issuer_id:
+    has_profiles = bool(app_profile_path and extension_profile_path) or bool(
+        app_profile_secret and extension_profile_secret
+    )
+
+    if (key_path or api_key_raw) and key_id and issuer_id and has_profiles:
         source = "file path" if key_path else "raw SHORTY_APP_STORE_CONNECT_API_KEY_P8"
         return CheckResult(
             "TestFlight credentials",
             Status.PASS,
             "API key "
             f"{key_id} via {source} "
-            "(profiles auto-managed via -allowProvisioningUpdates)",
+            "(App Store profile pair configured)",
+        )
+
+    if (key_path or api_key_raw) and key_id and issuer_id:
+        source = "file path" if key_path else "raw SHORTY_APP_STORE_CONNECT_API_KEY_P8"
+        return CheckResult(
+            "TestFlight credentials",
+            Status.WARN,
+            "API key "
+            f"{key_id} via {source} "
+            "but App Store provisioning profile pair is missing",
+            "Set SHORTY_APP_STORE_APP_PROFILE and "
+            "SHORTY_APP_STORE_EXTENSION_PROFILE in CI environments. "
+            "Use App Store Connect profileContent base64 payloads.",
         )
 
     if allow_local:
@@ -393,8 +424,8 @@ def check_testflight_credentials(env: dict[str, str]) -> CheckResult:
         Status.FAIL,
         f"Missing: {', '.join(missing)}",
         "Set the App Store Connect API key credentials (same ones used for "
-        "notarization).\nProvisioning profiles are auto-managed by xcodebuild "
-        "when API credentials are present.\n\n"
+        "notarization) and configure SHORTY_APP_STORE_APP_PROFILE plus "
+        "SHORTY_APP_STORE_EXTENSION_PROFILE in CI.\n\n"
         "Alternatively, set SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING=1 to use\n"
         "locally installed Apple Distribution certificates and profiles.",
     )

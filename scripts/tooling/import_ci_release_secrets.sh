@@ -79,6 +79,8 @@ for name in \
   SHORTY_DEVELOPER_ID_CERTIFICATE_PEM \
   SHORTY_DEVELOPER_ID_APP_PROFILE \
   SHORTY_DEVELOPER_ID_EXTENSION_PROFILE \
+  SHORTY_APP_STORE_APP_PROFILE \
+  SHORTY_APP_STORE_EXTENSION_PROFILE \
   SHORTY_DEVELOPER_ID_PRIVATE_KEY_PEM \
   SHORTY_CI_KEYCHAIN_PASSWORD \
   SHORTY_CODESIGN_IDENTITY \
@@ -97,6 +99,8 @@ keychain_path="$RUNNER_TEMP/shorty-signing.keychain-db"
 app_store_key_path="$RUNNER_TEMP/AuthKey_${SHORTY_APP_STORE_CONNECT_KEY_ID}.p8"
 app_profile_path="$RUNNER_TEMP/shorty-developer-id-app.provisionprofile"
 extension_profile_path="$RUNNER_TEMP/shorty-developer-id-extension.provisionprofile"
+app_store_app_profile_path="$RUNNER_TEMP/shorty-app-store-app.provisionprofile"
+app_store_extension_profile_path="$RUNNER_TEMP/shorty-app-store-extension.provisionprofile"
 
 write_secret_file "$SHORTY_DEVELOPER_ID_CERTIFICATE_PEM" "$certificate_path"
 write_secret_file "$SHORTY_DEVELOPER_ID_PRIVATE_KEY_PEM" "$private_key_path"
@@ -147,5 +151,9 @@ write_profile_file "$SHORTY_DEVELOPER_ID_APP_PROFILE" "$app_profile_path" SHORTY
 write_github_env SHORTY_DEVELOPER_ID_APP_PROFILE_PATH "$app_profile_path"
 write_profile_file "$SHORTY_DEVELOPER_ID_EXTENSION_PROFILE" "$extension_profile_path" SHORTY_DEVELOPER_ID_EXTENSION_PROFILE
 write_github_env SHORTY_DEVELOPER_ID_EXTENSION_PROFILE_PATH "$extension_profile_path"
+write_profile_file "$SHORTY_APP_STORE_APP_PROFILE" "$app_store_app_profile_path" SHORTY_APP_STORE_APP_PROFILE
+write_github_env SHORTY_APP_STORE_APP_PROFILE_PATH "$app_store_app_profile_path"
+write_profile_file "$SHORTY_APP_STORE_EXTENSION_PROFILE" "$app_store_extension_profile_path" SHORTY_APP_STORE_EXTENSION_PROFILE
+write_github_env SHORTY_APP_STORE_EXTENSION_PROFILE_PATH "$app_store_extension_profile_path"
 
 printf 'Imported Developer ID signing identity and App Store Connect key.\n'

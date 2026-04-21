@@ -720,8 +720,20 @@ def test_doctor_testflight_credentials_checks() -> None:
             "SHORTY_APP_STORE_CONNECT_ISSUER_ID": "uuid-here",
         }
     )
+    assert result.status == Status.WARN
+    assert "profile pair is missing" in result.message
+
+    result = check_testflight_credentials(
+        {
+            "SHORTY_APP_STORE_CONNECT_KEY_PATH": "/some/key.p8",
+            "SHORTY_APP_STORE_CONNECT_KEY_ID": "ABC123",
+            "SHORTY_APP_STORE_CONNECT_ISSUER_ID": "uuid-here",
+            "SHORTY_APP_STORE_APP_PROFILE": "base64-app-profile",
+            "SHORTY_APP_STORE_EXTENSION_PROFILE": "base64-extension-profile",
+        }
+    )
     assert result.status == Status.PASS
-    assert "auto-managed" in result.message
+    assert "profile pair configured" in result.message
 
     result = check_testflight_credentials({"SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING": "1"})
     assert result.status == Status.WARN
