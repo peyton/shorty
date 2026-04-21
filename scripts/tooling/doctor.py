@@ -385,9 +385,7 @@ def check_testflight_credentials(env: dict[str, str]) -> CheckResult:
         return CheckResult(
             "TestFlight credentials",
             Status.PASS,
-            "API key "
-            f"{key_id} via {source} "
-            "(App Store profile pair configured)",
+            f"API key {key_id} via {source} (App Store profile pair configured)",
         )
 
     if (key_path or api_key_raw) and key_id and issuer_id:
