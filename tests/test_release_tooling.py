@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import plistlib
 import subprocess
 import tarfile
@@ -69,6 +70,7 @@ def make_fake_app(
     root: Path,
     version: str = "1.0.0",
     build_number: str = "1",
+    category: str = "public.app-category.productivity",
 ) -> Path:
     app = root / "Shorty.app"
     contents = app / "Contents"
@@ -82,6 +84,7 @@ def make_fake_app(
                 "CFBundleIdentifier": "app.peyton.shorty",
                 "CFBundleShortVersionString": version,
                 "CFBundleVersion": build_number,
+                "LSApplicationCategoryType": category,
             }
         )
     )
@@ -118,10 +121,13 @@ def add_fake_safari_extension(
     (resources / "manifest.json").write_text(
         (
             '{"manifest_version":3,"permissions":["nativeMessaging"],'
+            '"icons":{"16":"icon-16.png","48":"icon-48.png","128":"icon-128.png"},'
             '"background":{"service_worker":"background.js"}}\n'
         ),
         encoding="utf-8",
     )
+    for name in ("icon-16.png", "icon-48.png", "icon-128.png"):
+        (resources / name).write_bytes(b"png")
     return extension
 
 
@@ -387,6 +393,26 @@ def test_safari_extension_verify_accepts_app_group_entitlements(
     assert result.bundle_identifier == "app.peyton.shorty.SafariWebExtension"
 
 
+def test_safari_extension_verify_rejects_missing_manifest_icons(tmp_path: Path) -> None:
+    app = make_fake_app(tmp_path)
+    add_fake_safari_extension(app)
+    manifest_path = (
+        app
+        / "Contents"
+        / "PlugIns"
+        / "ShortySafariWebExtension.appex"
+        / "Contents"
+        / "Resources"
+        / "manifest.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("icons")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(SafariExtensionVerificationError, match="icons mapping"):
+        verify_safari_extension(app, require_codesign=False)
+
+
 def test_release_verify_checks_archive_checksum_and_extension(tmp_path: Path) -> None:
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     (tmp_path / "LICENSE").write_text(
@@ -570,6 +596,36 @@ def test_app_store_candidate_validation_rejects_bad_build_number(
             app,
             entitlements,
             expected_version="1.0.0",
+        )
+
+
+def test_app_store_candidate_validation_requires_app_category(tmp_path: Path) -> None:
+    app = make_fake_app(
+        tmp_path,
+        version="1.0.0",
+        build_number="123",
+        category="",
+    )
+    add_fake_safari_extension(
+        app,
+        bundle_name="ShortyAppStoreSafariWebExtension.appex",
+        bundle_id="app.peyton.shorty.appstore.SafariWebExtension",
+        version="1.0.0",
+        build_number="123",
+    )
+    info_path = app / "Contents" / "Info.plist"
+    info = plistlib.loads(info_path.read_bytes())
+    info["CFBundleIdentifier"] = "app.peyton.shorty.appstore"
+    info_path.write_bytes(plistlib.dumps(info))
+    entitlements = tmp_path / "ShortyAppStore.entitlements"
+    entitlements.write_bytes(plistlib.dumps({"com.apple.security.app-sandbox": True}))
+
+    with pytest.raises(AppStoreValidationError, match="Expected app-store category"):
+        validate_app_store_candidate(
+            app,
+            entitlements,
+            expected_version="1.0.0",
+            expected_build_number="123",
         )
 
 

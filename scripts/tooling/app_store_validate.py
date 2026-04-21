@@ -33,6 +33,7 @@ DEFAULT_APP_STORE_APP_PATH = (
 DEFAULT_APP_STORE_ENTITLEMENTS = (
     REPO_ROOT / "app" / "Shorty" / "ShortyAppStore.entitlements"
 )
+EXPECTED_APP_CATEGORY = "public.app-category.productivity"
 
 
 class AppStoreValidationError(RuntimeError):
@@ -71,6 +72,11 @@ def validate_app_store_candidate(
         raise AppStoreValidationError(
             "Expected app-store bundle id app.peyton.shorty.appstore, "
             f"found {bundle_id}"
+        )
+    category = info.get("LSApplicationCategoryType")
+    if category != EXPECTED_APP_CATEGORY:
+        raise AppStoreValidationError(
+            f"Expected app-store category {EXPECTED_APP_CATEGORY}, found {category!r}."
         )
     validate_bundle_version(
         info=info,

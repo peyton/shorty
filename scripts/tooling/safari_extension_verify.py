@@ -139,6 +139,7 @@ def verify_safari_extension(
         raise SafariExtensionVerificationError(
             "Safari extension manifest must declare nativeMessaging."
         )
+    require_manifest_icons(manifest, manifest_path.parent)
 
     if require_codesign:
         require_codesign_verified(resolved_app_path)
@@ -152,6 +153,29 @@ def verify_safari_extension(
         bundle_identifier=str(bundle_id),
         manifest_version=int(manifest_version),
     )
+
+
+def require_manifest_icons(manifest: dict[str, object], resources_path: Path) -> None:
+    icons = manifest.get("icons")
+    if not isinstance(icons, dict) or not icons:
+        raise SafariExtensionVerificationError(
+            "Safari extension manifest must declare an icons mapping."
+        )
+
+    for size, relative_path in icons.items():
+        if not isinstance(size, str) or not size.isdigit():
+            raise SafariExtensionVerificationError(
+                "Safari extension manifest icons keys must be numeric strings."
+            )
+        if not isinstance(relative_path, str) or not relative_path.strip():
+            raise SafariExtensionVerificationError(
+                "Safari extension manifest icons values must be non-empty paths."
+            )
+        icon_path = resources_path / relative_path
+        if not icon_path.is_file():
+            raise SafariExtensionVerificationError(
+                f"Safari extension manifest icon is missing: {icon_path}"
+            )
 
 
 def main(argv: list[str] | None = None) -> int:

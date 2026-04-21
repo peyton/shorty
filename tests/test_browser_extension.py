@@ -40,12 +40,21 @@ def test_browser_extension_declares_required_permissions() -> None:
 
     assert manifest["manifest_version"] == 3
     assert manifest["homepage_url"] == "https://github.com/peyton/shorty"
+    assert manifest["icons"]["48"] == "icon-48.png"
     assert set(manifest["permissions"]) >= {"nativeMessaging", "tabs"}
     assert manifest["background"]["service_worker"] == "background.js"
     matches = manifest["content_scripts"][0]["matches"]
     assert "<all_urls>" not in matches
     assert "*://docs.google.com/*" in matches
     assert "*://*.slack.com/*" in matches
+
+
+def test_browser_extension_icons_exist_for_packaged_resources() -> None:
+    for root in [EXTENSION_ROOT, SAFARI_EXTENSION_ROOT]:
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        icons = manifest["icons"]
+        for relative_path in icons.values():
+            assert (root / relative_path).is_file()
 
 
 def test_background_worker_clears_domain_for_unsupported_pages() -> None:
