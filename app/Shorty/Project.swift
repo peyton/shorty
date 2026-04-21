@@ -94,10 +94,7 @@ let project = Project(
                 .target(name: "ShortyCore"),
                 .target(name: "ShortySafariWebExtension")
             ],
-            settings: targetSettings(
-                includeAppAssets: true,
-                activeCompilationConditions: ["SHORTY_APP_STORE"]
-            )
+            settings: targetSettings(includeAppAssets: true)
         ),
         .target(
             name: "ShortyAppStore",
@@ -117,7 +114,10 @@ let project = Project(
                 .target(name: "ShortyCore"),
                 .target(name: "ShortyAppStoreSafariWebExtension")
             ],
-            settings: targetSettings(includeAppAssets: true)
+            settings: targetSettings(
+                includeAppAssets: true,
+                activeCompilationConditions: ["SHORTY_APP_STORE"]
+            )
         ),
         .target(
             name: "ShortySafariWebExtension",

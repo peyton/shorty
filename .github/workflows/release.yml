@@ -1,0 +1,144 @@
+---
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Signed and Notarized Release
+    runs-on: macos-latest
+    environment: release
+    steps:
+      - if: ${{ !env.ACT }}
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - name: Install tools
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4
+        with:
+          cache: false
+          cache_save: false
+      - name: Validate tag metadata
+        id: metadata
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [ "${tag#v}" = "$tag" ]; then
+            printf '::error title=Invalid release tag::Tag %s must start with v (example: v1.2.3).\n' "$tag"
+            exit 1
+          fi
+          version="${tag#v}"
+          file_version="$(tr -d '[:space:]' < VERSION)"
+          if [ "$file_version" != "$version" ]; then
+            printf '::error title=Version mismatch::Tag %s does not match VERSION %s.\n' "$tag" "$file_version"
+            exit 1
+          fi
+          mise exec -- uv run python -m scripts.tooling.versioning app-version --version "$version"
+          {
+            printf 'tag=%s\n' "$tag"
+            printf 'version=%s\n' "$version"
+          } >>"$GITHUB_OUTPUT"
+      - name: Import CI release secrets
+        env:
+          SHORTY_APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.SHORTY_APP_STORE_CONNECT_API_KEY_P8 }}
+          SHORTY_APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.SHORTY_APP_STORE_CONNECT_ISSUER_ID }}
+          SHORTY_APP_STORE_CONNECT_KEY_ID: ${{ secrets.SHORTY_APP_STORE_CONNECT_KEY_ID }}
+          SHORTY_CI_KEYCHAIN_PASSWORD: ${{ secrets.SHORTY_CI_KEYCHAIN_PASSWORD }}
+          SHORTY_CODESIGN_IDENTITY: ${{ secrets.SHORTY_CODESIGN_IDENTITY }}
+          SHORTY_DEVELOPER_ID_APP_PROFILE: ${{ secrets.SHORTY_DEVELOPER_ID_APP_PROFILE }}
+          SHORTY_DEVELOPER_ID_CERTIFICATE_PEM: ${{ secrets.SHORTY_DEVELOPER_ID_CERTIFICATE_PEM }}
+          SHORTY_DEVELOPER_ID_EXTENSION_PROFILE: ${{ secrets.SHORTY_DEVELOPER_ID_EXTENSION_PROFILE }}
+          SHORTY_DEVELOPER_ID_PRIVATE_KEY_PASSWORD: ${{ secrets.SHORTY_DEVELOPER_ID_PRIVATE_KEY_PASSWORD }}
+          SHORTY_DEVELOPER_ID_PRIVATE_KEY_PEM: ${{ secrets.SHORTY_DEVELOPER_ID_PRIVATE_KEY_PEM }}
+        run: bash scripts/tooling/import_ci_release_secrets.sh
+      - name: Build signed and notarized release
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          mise exec -- just release VERSION="$VERSION" BUILD_NUMBER="$BUILD_NUMBER"
+      - name: Upload tagged App Store candidate to TestFlight
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          mise exec -- just app-store-export-testflight \
+            VERSION="$VERSION" \
+            BUILD_NUMBER="$BUILD_NUMBER"
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          release_dir=".build/releases"
+          zip="$release_dir/shorty-$VERSION-macos.zip"
+          zip_checksum="$zip.sha256"
+          dmg="$release_dir/shorty-$VERSION-macos.dmg"
+          dmg_checksum="$dmg.sha256"
+          source_archive="$release_dir/shorty-$VERSION-source.tar.gz"
+          source_checksum="$source_archive.sha256"
+          notes="$RUNNER_TEMP/release-notes.md"
+
+          for asset in "$zip" "$zip_checksum" "$dmg" "$dmg_checksum" "$source_archive" "$source_checksum"; do
+            if [ ! -f "$asset" ]; then
+              printf '::error title=Missing release asset::%s was not produced.\n' "$asset"
+              exit 1
+            fi
+          done
+
+          cat >"$notes" <<EOF
+          Shorty $VERSION
+
+          This release was Developer ID signed, notarized, stapled, and verified before upload.
+          A matching sandboxed App Store archive has been uploaded to TestFlight for internal testing.
+
+          Assets:
+          - shorty-$VERSION-macos.zip
+          - shorty-$VERSION-macos.dmg
+          - shorty-$VERSION-source.tar.gz
+          - SHA-256 checksums for each archive
+          EOF
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "$zip" \
+              "$zip_checksum" \
+              "$dmg" \
+              "$dmg_checksum" \
+              "$source_archive" \
+              "$source_checksum" \
+              --repo "$REPO" \
+              --clobber
+            gh release edit "$TAG" \
+              --repo "$REPO" \
+              --title "Shorty $VERSION" \
+              --notes-file "$notes" \
+              --latest
+          else
+            gh release create "$TAG" \
+              "$zip" \
+              "$zip_checksum" \
+              "$dmg" \
+              "$dmg_checksum" \
+              "$source_archive" \
+              "$source_checksum" \
+              --repo "$REPO" \
+              --target "$GITHUB_SHA" \
+              --title "Shorty $VERSION" \
+              --notes-file "$notes" \
+              --latest
+          fi

@@ -26,12 +26,26 @@ ENTITLEMENTS_FILES: dict[str, str] = {
 
 CI_SECRETS: list[tuple[str, str]] = [
     (
-        "SHORTY_DEVELOPER_ID_CERTIFICATE_BASE64",
-        "Base64-encoded .p12 Developer ID Application certificate",
+        "SHORTY_DEVELOPER_ID_CERTIFICATE_PEM",
+        "Developer ID Application certificate PEM (-----BEGIN CERTIFICATE-----)",
     ),
     (
-        "SHORTY_DEVELOPER_ID_CERTIFICATE_PASSWORD",
-        "Password for the .p12 certificate export",
+        "SHORTY_DEVELOPER_ID_PRIVATE_KEY_PEM",
+        "Developer ID Application private key PEM",
+    ),
+    (
+        "SHORTY_DEVELOPER_ID_PRIVATE_KEY_PASSWORD",
+        "Optional password for encrypted Developer ID private key PEM",
+    ),
+    (
+        "SHORTY_DEVELOPER_ID_APP_PROFILE",
+        "Base64 profileContent (recommended) or raw provisioning profile for "
+        "app.peyton.shorty",
+    ),
+    (
+        "SHORTY_DEVELOPER_ID_EXTENSION_PROFILE",
+        "Base64 profileContent (recommended) or raw provisioning profile for "
+        "app.peyton.shorty.SafariWebExtension",
     ),
     (
         "SHORTY_CI_KEYCHAIN_PASSWORD",
@@ -42,8 +56,8 @@ CI_SECRETS: list[tuple[str, str]] = [
         'Full identity, e.g. "Developer ID Application: Name (TEAMID)"',
     ),
     (
-        "SHORTY_APP_STORE_CONNECT_KEY_BASE64",
-        "Base64-encoded .p8 App Store Connect API Team key",
+        "SHORTY_APP_STORE_CONNECT_API_KEY_P8",
+        "Raw .p8 App Store Connect API Team key contents",
     ),
     (
         "SHORTY_APP_STORE_CONNECT_KEY_ID",
@@ -295,11 +309,12 @@ def check_notarization_credentials(env: dict[str, str]) -> CheckResult:
         )
 
     key_path = env.get("SHORTY_APP_STORE_CONNECT_KEY_PATH", "").strip()
+    api_key_raw = env.get("SHORTY_APP_STORE_CONNECT_API_KEY_P8", "").strip()
     key_id = env.get("SHORTY_APP_STORE_CONNECT_KEY_ID", "").strip()
     issuer_id = env.get("SHORTY_APP_STORE_CONNECT_ISSUER_ID", "").strip()
 
     missing = []
-    if not key_path:
+    if not key_path and not api_key_raw:
         missing.append("SHORTY_APP_STORE_CONNECT_KEY_PATH")
     if not key_id:
         missing.append("SHORTY_APP_STORE_CONNECT_KEY_ID")
@@ -316,6 +331,7 @@ def check_notarization_credentials(env: dict[str, str]) -> CheckResult:
             "  export NOTARYTOOL_PROFILE=<profile-name>\n\n"
             "Option B — API key (local and CI):\n"
             "  export SHORTY_APP_STORE_CONNECT_KEY_PATH=/path/to/AuthKey_XXX.p8\n"
+            "  # or set SHORTY_APP_STORE_CONNECT_API_KEY_P8 to raw .p8 text\n"
             "  export SHORTY_APP_STORE_CONNECT_KEY_ID=<key-id>\n"
             "  export SHORTY_APP_STORE_CONNECT_ISSUER_ID=<issuer-uuid>\n\n"
             "The API key must be a Team key (not Individual).",
@@ -329,20 +345,29 @@ def check_notarization_credentials(env: dict[str, str]) -> CheckResult:
             "Verify SHORTY_APP_STORE_CONNECT_KEY_PATH points to a valid .p8 file.",
         )
 
-    return CheckResult("Notarization credentials", Status.PASS, f"API key {key_id}")
+    source = "file path" if key_path else "raw SHORTY_APP_STORE_CONNECT_API_KEY_P8"
+    return CheckResult(
+        "Notarization credentials",
+        Status.PASS,
+        f"API key {key_id} ({source})",
+    )
 
 
 def check_testflight_credentials(env: dict[str, str]) -> CheckResult:
     key_path = env.get("SHORTY_APP_STORE_CONNECT_KEY_PATH", "").strip()
+    api_key_raw = env.get("SHORTY_APP_STORE_CONNECT_API_KEY_P8", "").strip()
     key_id = env.get("SHORTY_APP_STORE_CONNECT_KEY_ID", "").strip()
     issuer_id = env.get("SHORTY_APP_STORE_CONNECT_ISSUER_ID", "").strip()
     allow_local = env.get("SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING") == "1"
 
-    if key_path and key_id and issuer_id:
+    if (key_path or api_key_raw) and key_id and issuer_id:
+        source = "file path" if key_path else "raw SHORTY_APP_STORE_CONNECT_API_KEY_P8"
         return CheckResult(
             "TestFlight credentials",
             Status.PASS,
-            f"API key {key_id} (profiles auto-managed via -allowProvisioningUpdates)",
+            "API key "
+            f"{key_id} via {source} "
+            "(profiles auto-managed via -allowProvisioningUpdates)",
         )
 
     if allow_local:
@@ -356,7 +381,7 @@ def check_testflight_credentials(env: dict[str, str]) -> CheckResult:
         )
 
     missing = []
-    if not key_path:
+    if not key_path and not api_key_raw:
         missing.append("SHORTY_APP_STORE_CONNECT_KEY_PATH")
     if not key_id:
         missing.append("SHORTY_APP_STORE_CONNECT_KEY_ID")
@@ -446,7 +471,8 @@ def format_report(report: DoctorReport) -> str:
     # CI secrets reference
     lines.append("\033[1mGitHub CI Secrets\033[0m")
     lines.append(
-        "  Configure these in the \033[1mpreview-release\033[0m GitHub Environment:"
+        "  Configure these in the GitHub Environments used by release workflows"
+        " (\033[1mpreview-release\033[0m and \033[1mrelease\033[0m):"
     )
     for secret_name, desc in CI_SECRETS:
         lines.append(f"  \033[90m-\033[0m {secret_name}")

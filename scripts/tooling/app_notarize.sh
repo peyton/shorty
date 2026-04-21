@@ -51,6 +51,8 @@ if [ -n "${NOTARYTOOL_PROFILE:-}" ]; then
     --keychain-profile "$NOTARYTOOL_PROFILE" \
     --wait
 else
+  materialize_app_store_connect_key_if_needed
+
   missing=0
   for name in SHORTY_APP_STORE_CONNECT_KEY_PATH SHORTY_APP_STORE_CONNECT_KEY_ID SHORTY_APP_STORE_CONNECT_ISSUER_ID; do
     if [ -z "${!name:-}" ]; then
@@ -60,6 +62,7 @@ else
   done
   if [ "$missing" -ne 0 ]; then
     printf 'Set NOTARYTOOL_PROFILE or SHORTY_APP_STORE_CONNECT_KEY_PATH, SHORTY_APP_STORE_CONNECT_KEY_ID, and SHORTY_APP_STORE_CONNECT_ISSUER_ID.\n' >&2
+    printf 'For CI, set SHORTY_APP_STORE_CONNECT_API_KEY_P8 to the raw .p8 contents.\n' >&2
     printf 'The App Store Connect API key must be a Team key for notarytool.\n' >&2
     exit 2
   fi

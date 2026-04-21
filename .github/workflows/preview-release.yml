@@ -53,47 +53,23 @@ jobs:
             printf 'label=%s\n' "$label"
             printf 'short_sha=%s\n' "${HEAD_SHA:0:12}"
           } >>"$GITHUB_OUTPUT"
-      - name: Import Developer ID certificate
+      - name: Import CI release secrets
         env:
-          CERTIFICATE_BASE64: ${{ secrets.SHORTY_DEVELOPER_ID_CERTIFICATE_BASE64 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.SHORTY_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.SHORTY_CI_KEYCHAIN_PASSWORD }}
-        run: |
-          missing=0
-          for name in CERTIFICATE_BASE64 CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD; do
-            if [ -z "${!name:-}" ]; then
-              printf '::error title=Missing signing secret::%s is required for preview releases.\n' "$name"
-              missing=1
-            fi
-          done
-          if [ "$missing" -ne 0 ]; then
-            exit 2
-          fi
-
-          certificate_path="$RUNNER_TEMP/shorty-developer-id.p12"
-          keychain_path="$RUNNER_TEMP/shorty-signing.keychain-db"
-
-          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode >"$certificate_path"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
-          security set-keychain-settings -lut 21600 "$keychain_path"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
-          security import "$certificate_path" \
-            -P "$CERTIFICATE_PASSWORD" \
-            -A \
-            -t cert \
-            -f pkcs12 \
-            -k "$keychain_path"
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s \
-            -k "$KEYCHAIN_PASSWORD" \
-            "$keychain_path"
-          security list-keychains -d user -s "$keychain_path"
+          SHORTY_APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.SHORTY_APP_STORE_CONNECT_API_KEY_P8 }}
+          SHORTY_APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.SHORTY_APP_STORE_CONNECT_ISSUER_ID }}
+          SHORTY_APP_STORE_CONNECT_KEY_ID: ${{ secrets.SHORTY_APP_STORE_CONNECT_KEY_ID }}
+          SHORTY_CI_KEYCHAIN_PASSWORD: ${{ secrets.SHORTY_CI_KEYCHAIN_PASSWORD }}
+          SHORTY_CODESIGN_IDENTITY: ${{ secrets.SHORTY_CODESIGN_IDENTITY }}
+          SHORTY_DEVELOPER_ID_APP_PROFILE: ${{ secrets.SHORTY_DEVELOPER_ID_APP_PROFILE }}
+          SHORTY_DEVELOPER_ID_CERTIFICATE_PEM: ${{ secrets.SHORTY_DEVELOPER_ID_CERTIFICATE_PEM }}
+          SHORTY_DEVELOPER_ID_EXTENSION_PROFILE: ${{ secrets.SHORTY_DEVELOPER_ID_EXTENSION_PROFILE }}
+          SHORTY_DEVELOPER_ID_PRIVATE_KEY_PASSWORD: ${{ secrets.SHORTY_DEVELOPER_ID_PRIVATE_KEY_PASSWORD }}
+          SHORTY_DEVELOPER_ID_PRIVATE_KEY_PEM: ${{ secrets.SHORTY_DEVELOPER_ID_PRIVATE_KEY_PEM }}
+        run: bash scripts/tooling/import_ci_release_secrets.sh
       - name: Package preview artifact
         env:
           ARTIFACT_LABEL: ${{ steps.metadata.outputs.label }}
           SHORTY_BUILD_NUMBER: ${{ github.run_number }}
-          SHORTY_CODESIGN_IDENTITY: ${{ secrets.SHORTY_CODESIGN_IDENTITY }}
           SHORTY_MARKETING_VERSION: ${{ steps.metadata.outputs.version }}
           VERSION: ${{ steps.metadata.outputs.version }}
         run: |
@@ -101,34 +77,9 @@ jobs:
           mise exec -- just app-package \
             VERSION="$VERSION" \
             ARTIFACT_LABEL="$ARTIFACT_LABEL"
-      - name: Write App Store Connect API key
-        id: app-store-connect-key
-        env:
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.SHORTY_APP_STORE_CONNECT_ISSUER_ID }}
-          APP_STORE_CONNECT_KEY_BASE64: ${{ secrets.SHORTY_APP_STORE_CONNECT_KEY_BASE64 }}
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.SHORTY_APP_STORE_CONNECT_KEY_ID }}
-        run: |
-          missing=0
-          for name in APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_KEY_BASE64 APP_STORE_CONNECT_KEY_ID; do
-            if [ -z "${!name:-}" ]; then
-              printf '::error title=Missing App Store Connect secret::%s is required for preview notarization.\n' "$name"
-              missing=1
-            fi
-          done
-          if [ "$missing" -ne 0 ]; then
-            exit 2
-          fi
-
-          key_path="$RUNNER_TEMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
-          printf '%s' "$APP_STORE_CONNECT_KEY_BASE64" | base64 --decode >"$key_path"
-          chmod 600 "$key_path"
-          printf 'key_path=%s\n' "$key_path" >>"$GITHUB_OUTPUT"
       - name: Notarize preview artifact
         env:
           ARTIFACT_LABEL: ${{ steps.metadata.outputs.label }}
-          SHORTY_APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.SHORTY_APP_STORE_CONNECT_ISSUER_ID }}
-          SHORTY_APP_STORE_CONNECT_KEY_ID: ${{ secrets.SHORTY_APP_STORE_CONNECT_KEY_ID }}
-          SHORTY_APP_STORE_CONNECT_KEY_PATH: ${{ steps.app-store-connect-key.outputs.key_path }}
           VERSION: ${{ steps.metadata.outputs.version }}
         run: |
           mise exec -- just app-notarize \
@@ -150,6 +101,14 @@ jobs:
             --require-codesign \
             --require-gatekeeper \
             --require-staple
+      - name: Upload App Store candidate to TestFlight
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          mise exec -- just app-store-export-testflight \
+            VERSION="$VERSION" \
+            BUILD_NUMBER="$BUILD_NUMBER"
       - name: Publish preview release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -174,6 +133,7 @@ jobs:
           Artifact label: $LABEL
 
           This preview is Developer ID signed, notarized, stapled, and verified before upload.
+          A matching sandboxed App Store archive has been uploaded to TestFlight for internal testing.
           This is a prerelease preview artifact. Public releases use SemVer tags like v$VERSION.
           EOF
 

@@ -75,7 +75,32 @@ validate_apple_build_number() {
   uv run python -m scripts.tooling.versioning build-number --build-number "$1" >/dev/null
 }
 
+materialize_app_store_connect_key_if_needed() {
+  if [ -n "${SHORTY_APP_STORE_CONNECT_KEY_PATH:-}" ]; then
+    return 0
+  fi
+  if [ -z "${SHORTY_APP_STORE_CONNECT_API_KEY_P8:-}" ]; then
+    return 0
+  fi
+  if [ -z "${SHORTY_APP_STORE_CONNECT_KEY_ID:-}" ]; then
+    printf 'SHORTY_APP_STORE_CONNECT_KEY_ID is required when SHORTY_APP_STORE_CONNECT_API_KEY_P8 is set.\n' >&2
+    return 1
+  fi
+
+  local secret_dir="$REPO_ROOT/.build/secrets"
+  local key_path="$secret_dir/AuthKey_${SHORTY_APP_STORE_CONNECT_KEY_ID}.p8"
+  mkdir -p "$secret_dir"
+  chmod 700 "$secret_dir"
+  (
+    umask 077
+    printf '%s\n' "$SHORTY_APP_STORE_CONNECT_API_KEY_P8" >"$key_path"
+  )
+  export SHORTY_APP_STORE_CONNECT_KEY_PATH="$key_path"
+}
+
 app_store_connect_auth_args() {
+  materialize_app_store_connect_key_if_needed || return 1
+
   local key_path="${SHORTY_APP_STORE_CONNECT_KEY_PATH:-}"
   local key_id="${SHORTY_APP_STORE_CONNECT_KEY_ID:-}"
   local issuer_id="${SHORTY_APP_STORE_CONNECT_ISSUER_ID:-}"
@@ -107,6 +132,8 @@ App Store archive requires explicit signing credentials.
 Set SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING=1 to use installed Apple distribution
 certificates/profiles, or set SHORTY_APP_STORE_CONNECT_KEY_PATH,
 SHORTY_APP_STORE_CONNECT_KEY_ID, and SHORTY_APP_STORE_CONNECT_ISSUER_ID.
+For CI, SHORTY_APP_STORE_CONNECT_API_KEY_P8 may be provided as the raw .p8
+contents and will be written to a temporary key file.
 EOF
   return 1
 }
@@ -120,6 +147,8 @@ require_app_store_connect_credentials() {
 TestFlight upload requires App Store Connect API credentials:
 SHORTY_APP_STORE_CONNECT_KEY_PATH, SHORTY_APP_STORE_CONNECT_KEY_ID, and
 SHORTY_APP_STORE_CONNECT_ISSUER_ID.
+For CI, SHORTY_APP_STORE_CONNECT_API_KEY_P8 may be provided as the raw .p8
+contents and will be written to a temporary key file.
 EOF
   return 1
 }
