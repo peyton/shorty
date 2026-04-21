@@ -131,7 +131,7 @@ Release:
 - `just app-store-validate VERSION=1.0.0 BUILD_NUMBER=123` - verify the App Store candidate bundle composition, sandbox entitlement, Safari extension, SemVer, and numeric Apple build number.
 - `just app-store-archive VERSION=1.0.0 BUILD_NUMBER=123` - create a signed App Store `.xcarchive`. Requires explicit local signing or App Store Connect API credentials.
 - `just app-store-export-testflight VERSION=1.0.0 BUILD_NUMBER=123` - upload the signed archive to App Store Connect for internal TestFlight testing. Requires App Store Connect API credentials.
-- `just release VERSION=1.0.0` - run the strict Developer ID release lane: preflight, packaging, notarization, DMG, and strict verification. Use `LANE=app-store-candidate` for the secondary App Store candidate build.
+- `just release VERSION=1.0.0` - run the strict Developer ID release lane: preflight, packaging, notarization, DMG, and strict verification. If you override the lane, pass `BUILD_NUMBER` before `LANE`, for example `just release VERSION=1.0.0 BUILD_NUMBER=123 LANE=app-store-candidate`.
 
 Web:
 

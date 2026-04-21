@@ -96,7 +96,7 @@ profile-energy PROFILE='idle':
     profile="{{PROFILE}}"; profile="${profile#PROFILE=}"; bash scripts/tooling/energy_profile.sh "$profile"
 
 [group('release')]
-release VERSION='local' LANE='developer-id-with-safari' BUILD_NUMBER='1':
+release VERSION='local' BUILD_NUMBER='1' LANE='developer-id-with-safari':
     version="{{VERSION}}"; version="${version#VERSION=}"; lane="{{LANE}}"; lane="${lane#LANE=}"; build_number="{{BUILD_NUMBER}}"; build_number="${build_number#BUILD_NUMBER=}"; bash scripts/tooling/release_lane.sh --version "$version" --lane "$lane" --build-number "$build_number"
 
 [group('web')]

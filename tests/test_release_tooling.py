@@ -666,6 +666,37 @@ def test_app_store_candidate_validation_requires_export_compliance_key(
         )
 
 
+def test_just_release_dry_run_keeps_default_lane_with_explicit_build_number() -> None:
+    result = subprocess.run(
+        ["just", "--dry-run", "release", "VERSION=1.0.0", "BUILD_NUMBER=29"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert 'lane="developer-id-with-safari"' in result.stderr
+    assert 'build_number="BUILD_NUMBER=29"' in result.stderr
+
+
+def test_just_release_dry_run_allows_explicit_lane_after_build_number() -> None:
+    result = subprocess.run(
+        [
+            "just",
+            "--dry-run",
+            "release",
+            "VERSION=1.0.0",
+            "BUILD_NUMBER=29",
+            "LANE=app-store-candidate",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert 'lane="LANE=app-store-candidate"' in result.stderr
+    assert 'build_number="BUILD_NUMBER=29"' in result.stderr
+
+
 # ---------------------------------------------------------------------------
 # Doctor checks
 # ---------------------------------------------------------------------------
