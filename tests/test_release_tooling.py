@@ -71,6 +71,7 @@ def make_fake_app(
     version: str = "1.0.0",
     build_number: str = "1",
     category: str = "public.app-category.productivity",
+    uses_non_exempt_encryption: bool = False,
 ) -> Path:
     app = root / "Shorty.app"
     contents = app / "Contents"
@@ -84,6 +85,7 @@ def make_fake_app(
                 "CFBundleIdentifier": "app.peyton.shorty",
                 "CFBundleShortVersionString": version,
                 "CFBundleVersion": build_number,
+                "ITSAppUsesNonExemptEncryption": uses_non_exempt_encryption,
                 "LSApplicationCategoryType": category,
             }
         )
@@ -621,6 +623,41 @@ def test_app_store_candidate_validation_requires_app_category(tmp_path: Path) ->
     entitlements.write_bytes(plistlib.dumps({"com.apple.security.app-sandbox": True}))
 
     with pytest.raises(AppStoreValidationError, match="Expected app-store category"):
+        validate_app_store_candidate(
+            app,
+            entitlements,
+            expected_version="1.0.0",
+            expected_build_number="123",
+        )
+
+
+def test_app_store_candidate_validation_requires_export_compliance_key(
+    tmp_path: Path,
+) -> None:
+    app = make_fake_app(
+        tmp_path,
+        version="1.0.0",
+        build_number="123",
+    )
+    add_fake_safari_extension(
+        app,
+        bundle_name="ShortyAppStoreSafariWebExtension.appex",
+        bundle_id="app.peyton.shorty.appstore.SafariWebExtension",
+        version="1.0.0",
+        build_number="123",
+    )
+    info_path = app / "Contents" / "Info.plist"
+    info = plistlib.loads(info_path.read_bytes())
+    info["CFBundleIdentifier"] = "app.peyton.shorty.appstore"
+    del info["ITSAppUsesNonExemptEncryption"]
+    info_path.write_bytes(plistlib.dumps(info))
+    entitlements = tmp_path / "ShortyAppStore.entitlements"
+    entitlements.write_bytes(plistlib.dumps({"com.apple.security.app-sandbox": True}))
+
+    with pytest.raises(
+        AppStoreValidationError,
+        match="ITSAppUsesNonExemptEncryption",
+    ):
         validate_app_store_candidate(
             app,
             entitlements,

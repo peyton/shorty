@@ -34,6 +34,7 @@ DEFAULT_APP_STORE_ENTITLEMENTS = (
     REPO_ROOT / "app" / "Shorty" / "ShortyAppStore.entitlements"
 )
 EXPECTED_APP_CATEGORY = "public.app-category.productivity"
+EXPECTED_NON_EXEMPT_ENCRYPTION = False
 
 
 class AppStoreValidationError(RuntimeError):
@@ -77,6 +78,13 @@ def validate_app_store_candidate(
     if category != EXPECTED_APP_CATEGORY:
         raise AppStoreValidationError(
             f"Expected app-store category {EXPECTED_APP_CATEGORY}, found {category!r}."
+        )
+    uses_non_exempt_encryption = info.get("ITSAppUsesNonExemptEncryption")
+    if uses_non_exempt_encryption is not EXPECTED_NON_EXEMPT_ENCRYPTION:
+        raise AppStoreValidationError(
+            "Expected ITSAppUsesNonExemptEncryption to be false for the "
+            "App Store candidate so App Store Connect does not require "
+            "manual export-compliance answers."
         )
     validate_bundle_version(
         info=info,
