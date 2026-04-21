@@ -59,6 +59,40 @@ if [ ! -d "$archive_path" ]; then
     --archive-path "$archive_path"
 fi
 
+app_bundle_path="$archive_path/Products/Applications/ShortyAppStore.app"
+extension_bundle_path="$app_bundle_path/Contents/PlugIns/ShortyAppStoreSafariWebExtension.appex"
+app_profile_path="$app_bundle_path/Contents/embedded.provisionprofile"
+extension_profile_path="$extension_bundle_path/Contents/embedded.provisionprofile"
+
+if [ ! -f "$app_profile_path" ]; then
+  printf 'Embedded app provisioning profile missing from archive: %s\n' "$app_profile_path" >&2
+  exit 1
+fi
+if [ ! -f "$extension_profile_path" ]; then
+  printf 'Embedded extension provisioning profile missing from archive: %s\n' "$extension_profile_path" >&2
+  exit 1
+fi
+
+extract_profile_value() {
+  local profile_path="$1"
+  local key_path="$2"
+  local profile_plist
+  profile_plist="$(mktemp "${TMPDIR:-/tmp}/shorty-profile.XXXXXX.plist")"
+  security cms -D -i "$profile_path" >"$profile_plist"
+  /usr/libexec/PlistBuddy -c "Print :$key_path" "$profile_plist"
+  rm -f "$profile_plist"
+}
+
+app_profile_uuid="$(extract_profile_value "$app_profile_path" "UUID")"
+app_profile_name="$(extract_profile_value "$app_profile_path" "Name")"
+extension_profile_uuid="$(extract_profile_value "$extension_profile_path" "UUID")"
+extension_profile_name="$(extract_profile_value "$extension_profile_path" "Name")"
+
+local_profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+mkdir -p "$local_profiles_dir"
+cp "$app_profile_path" "$local_profiles_dir/$app_profile_uuid.provisionprofile"
+cp "$extension_profile_path" "$local_profiles_dir/$extension_profile_uuid.provisionprofile"
+
 export_options="$REPO_ROOT/.build/app-store/export-options-testflight.plist"
 mkdir -p "$(dirname "$export_options")" "$export_path"
 cat >"$export_options" <<EOF
@@ -73,7 +107,14 @@ cat >"$export_options" <<EOF
   <key>method</key>
   <string>app-store-connect</string>
   <key>signingStyle</key>
-  <string>automatic</string>
+  <string>manual</string>
+  <key>provisioningProfiles</key>
+  <dict>
+    <key>app.peyton.shorty.appstore</key>
+    <string>${app_profile_name}</string>
+    <key>app.peyton.shorty.appstore.SafariWebExtension</key>
+    <string>${extension_profile_name}</string>
+  </dict>
   <key>teamID</key>
   <string>${TEAM_ID}</string>
   <key>testFlightInternalTestingOnly</key>
@@ -84,19 +125,11 @@ cat >"$export_options" <<EOF
 </plist>
 EOF
 
-auth_args=(
-  -authenticationKeyPath "$SHORTY_APP_STORE_CONNECT_KEY_PATH"
-  -authenticationKeyID "$SHORTY_APP_STORE_CONNECT_KEY_ID"
-  -authenticationKeyIssuerID "$SHORTY_APP_STORE_CONNECT_ISSUER_ID"
-)
-
 xcodebuild \
   -exportArchive \
   -archivePath "$archive_path" \
   -exportPath "$export_path" \
-  -exportOptionsPlist "$export_options" \
-  -allowProvisioningUpdates \
-  "${auth_args[@]}"
+  -exportOptionsPlist "$export_options"
 
 upload_package="$(find "$export_path" -type f \( -name '*.pkg' -o -name '*.ipa' \) -print -quit)"
 if [ -z "$upload_package" ]; then
