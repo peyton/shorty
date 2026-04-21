@@ -65,6 +65,7 @@ app_bundle_path="$archive_path/Products/Applications/ShortyAppStore.app"
 extension_bundle_path="$app_bundle_path/Contents/PlugIns/ShortyAppStoreSafariWebExtension.appex"
 embedded_app_profile_path="$app_bundle_path/Contents/embedded.provisionprofile"
 embedded_extension_profile_path="$extension_bundle_path/Contents/embedded.provisionprofile"
+prefer_manual_profiles="${SHORTY_APP_STORE_PREFER_MANUAL_PROFILES:-0}"
 
 select_profile_for_bundle() {
   local expected_bundle_id="$1"
@@ -109,7 +110,9 @@ extension_profile_path="$(select_profile_for_bundle \
   "${SHORTY_DEVELOPER_ID_EXTENSION_PROFILE_PATH:-}" || true)"
 
 use_manual_profiles=0
-if [ -n "$app_profile_path" ] && [ -n "$extension_profile_path" ]; then
+if [ "$prefer_manual_profiles" = "1" ] &&
+  [ -n "$app_profile_path" ] &&
+  [ -n "$extension_profile_path" ]; then
   use_manual_profiles=1
 
   app_profile_uuid="$(provisioning_profile_value "$app_profile_path" "UUID")"
@@ -122,8 +125,12 @@ if [ -n "$app_profile_path" ] && [ -n "$extension_profile_path" ]; then
   cp "$app_profile_path" "$local_profiles_dir/$app_profile_uuid.provisionprofile"
   cp "$extension_profile_path" "$local_profiles_dir/$extension_profile_uuid.provisionprofile"
 else
-  printf 'App Store profiles for %s and %s were not both available locally; falling back to automatic export.\n' \
-    "$app_bundle_id" "$extension_bundle_id" >&2
+  if [ -n "$app_profile_path" ] && [ -n "$extension_profile_path" ]; then
+    printf 'Automatic export signing is enabled by default; set SHORTY_APP_STORE_PREFER_MANUAL_PROFILES=1 to force manual provisioning profile export.\n' >&2
+  else
+    printf 'App Store profiles for %s and %s were not both available locally; using automatic export.\n' \
+      "$app_bundle_id" "$extension_bundle_id" >&2
+  fi
 fi
 
 export_options="$REPO_ROOT/.build/app-store/export-options-testflight.plist"
