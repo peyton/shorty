@@ -50,7 +50,8 @@ sync_tuist_shorty_version_env
 generate_workspace
 
 auth_args=()
-if app_store_connect_auth_args >/dev/null; then
+if [ "${SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING:-}" != "1" ] &&
+  app_store_connect_auth_args >/dev/null; then
   auth_args=(
     -allowProvisioningUpdates
     -authenticationKeyPath "$SHORTY_APP_STORE_CONNECT_KEY_PATH"

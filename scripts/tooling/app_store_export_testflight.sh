@@ -65,7 +65,14 @@ app_bundle_path="$archive_path/Products/Applications/ShortyAppStore.app"
 extension_bundle_path="$app_bundle_path/Contents/PlugIns/ShortyAppStoreSafariWebExtension.appex"
 embedded_app_profile_path="$app_bundle_path/Contents/embedded.provisionprofile"
 embedded_extension_profile_path="$extension_bundle_path/Contents/embedded.provisionprofile"
-prefer_manual_profiles="${SHORTY_APP_STORE_PREFER_MANUAL_PROFILES:-0}"
+prefer_manual_profiles="${SHORTY_APP_STORE_PREFER_MANUAL_PROFILES:-}"
+if [ -z "$prefer_manual_profiles" ]; then
+  if [ "${SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING:-0}" = "1" ]; then
+    prefer_manual_profiles=1
+  else
+    prefer_manual_profiles=0
+  fi
+fi
 
 select_profile_for_bundle() {
   local expected_bundle_id="$1"

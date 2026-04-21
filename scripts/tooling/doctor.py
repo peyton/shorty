@@ -58,6 +58,30 @@ CI_SECRETS: list[tuple[str, str]] = [
         "app.peyton.shorty.appstore.SafariWebExtension",
     ),
     (
+        "SHORTY_APPLE_DISTRIBUTION_CERTIFICATE_PEM",
+        "Optional for manual TestFlight export: Apple Distribution certificate PEM",
+    ),
+    (
+        "SHORTY_APPLE_DISTRIBUTION_PRIVATE_KEY_PEM",
+        "Optional for manual TestFlight export: Apple Distribution private key PEM",
+    ),
+    (
+        "SHORTY_APPLE_DISTRIBUTION_PRIVATE_KEY_PASSWORD",
+        "Optional password for encrypted Apple Distribution private key PEM",
+    ),
+    (
+        "SHORTY_MAC_INSTALLER_DISTRIBUTION_CERTIFICATE_PEM",
+        "Optional for manual TestFlight export: Mac Installer Distribution certificate PEM",
+    ),
+    (
+        "SHORTY_MAC_INSTALLER_DISTRIBUTION_PRIVATE_KEY_PEM",
+        "Optional for manual TestFlight export: Mac Installer Distribution private key PEM",
+    ),
+    (
+        "SHORTY_MAC_INSTALLER_DISTRIBUTION_PRIVATE_KEY_PASSWORD",
+        "Optional password for encrypted Mac Installer Distribution private key PEM",
+    ),
+    (
         "SHORTY_CI_KEYCHAIN_PASSWORD",
         "Arbitrary strong password for the CI temp keychain",
     ),
@@ -380,6 +404,14 @@ def check_testflight_credentials(env: dict[str, str]) -> CheckResult:
         app_profile_secret and extension_profile_secret
     )
 
+    if allow_local and (key_path or api_key_raw) and key_id and issuer_id and has_profiles:
+        source = "file path" if key_path else "raw SHORTY_APP_STORE_CONNECT_API_KEY_P8"
+        return CheckResult(
+            "TestFlight credentials",
+            Status.PASS,
+            f"API key {key_id} via {source} with local App Store signing enabled",
+        )
+
     if (key_path or api_key_raw) and key_id and issuer_id and has_profiles:
         source = "file path" if key_path else "raw SHORTY_APP_STORE_CONNECT_API_KEY_P8"
         return CheckResult(
@@ -398,7 +430,10 @@ def check_testflight_credentials(env: dict[str, str]) -> CheckResult:
             "but App Store provisioning profile pair is missing",
             "Set SHORTY_APP_STORE_APP_PROFILE and "
             "SHORTY_APP_STORE_EXTENSION_PROFILE in CI environments. "
-            "Use App Store Connect profileContent base64 payloads.",
+            "Use App Store Connect profileContent base64 payloads. "
+            "For manual export signing, also add the "
+            "SHORTY_APPLE_DISTRIBUTION_* and "
+            "SHORTY_MAC_INSTALLER_DISTRIBUTION_* secrets.",
         )
 
     if allow_local:
@@ -408,7 +443,9 @@ def check_testflight_credentials(env: dict[str, str]) -> CheckResult:
             "SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING=1 — using locally installed "
             "certificates and profiles",
             "Ensure an Apple Distribution certificate and provisioning profiles "
-            "for app.peyton.shorty.appstore are installed.",
+            "for app.peyton.shorty.appstore are installed. "
+            "Mac Installer Distribution is also required for exported .pkg "
+            "upload lanes.",
         )
 
     missing = []
@@ -425,7 +462,10 @@ def check_testflight_credentials(env: dict[str, str]) -> CheckResult:
         f"Missing: {', '.join(missing)}",
         "Set the App Store Connect API key credentials (same ones used for "
         "notarization) and configure SHORTY_APP_STORE_APP_PROFILE plus "
-        "SHORTY_APP_STORE_EXTENSION_PROFILE in CI.\n\n"
+        "SHORTY_APP_STORE_EXTENSION_PROFILE in CI.\n"
+        "For resilient CI exports, also configure the optional "
+        "SHORTY_APPLE_DISTRIBUTION_* and "
+        "SHORTY_MAC_INSTALLER_DISTRIBUTION_* secrets.\n\n"
         "Alternatively, set SHORTY_APP_STORE_ALLOW_LOCAL_SIGNING=1 to use\n"
         "locally installed Apple Distribution certificates and profiles.",
     )
