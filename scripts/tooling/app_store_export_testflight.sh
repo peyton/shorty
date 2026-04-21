@@ -59,19 +59,12 @@ if [ ! -d "$archive_path" ]; then
     --archive-path "$archive_path"
 fi
 
+app_bundle_id="app.peyton.shorty.appstore"
+extension_bundle_id="app.peyton.shorty.appstore.SafariWebExtension"
 app_bundle_path="$archive_path/Products/Applications/ShortyAppStore.app"
 extension_bundle_path="$app_bundle_path/Contents/PlugIns/ShortyAppStoreSafariWebExtension.appex"
-app_profile_path="$app_bundle_path/Contents/embedded.provisionprofile"
-extension_profile_path="$extension_bundle_path/Contents/embedded.provisionprofile"
-
-if [ ! -f "$app_profile_path" ]; then
-  printf 'Embedded app provisioning profile missing from archive: %s\n' "$app_profile_path" >&2
-  exit 1
-fi
-if [ ! -f "$extension_profile_path" ]; then
-  printf 'Embedded extension provisioning profile missing from archive: %s\n' "$extension_profile_path" >&2
-  exit 1
-fi
+embedded_app_profile_path="$app_bundle_path/Contents/embedded.provisionprofile"
+embedded_extension_profile_path="$extension_bundle_path/Contents/embedded.provisionprofile"
 
 extract_profile_value() {
   local profile_path="$1"
@@ -83,19 +76,74 @@ extract_profile_value() {
   rm -f "$profile_plist"
 }
 
-app_profile_uuid="$(extract_profile_value "$app_profile_path" "UUID")"
-app_profile_name="$(extract_profile_value "$app_profile_path" "Name")"
-extension_profile_uuid="$(extract_profile_value "$extension_profile_path" "UUID")"
-extension_profile_name="$(extract_profile_value "$extension_profile_path" "Name")"
+profile_bundle_id() {
+  local profile_path="$1"
+  local app_identifier
+  app_identifier="$(extract_profile_value "$profile_path" "Entitlements:application-identifier")" || return 1
+  printf '%s\n' "${app_identifier#*.}"
+}
 
-local_profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
-mkdir -p "$local_profiles_dir"
-cp "$app_profile_path" "$local_profiles_dir/$app_profile_uuid.provisionprofile"
-cp "$extension_profile_path" "$local_profiles_dir/$extension_profile_uuid.provisionprofile"
+select_profile_for_bundle() {
+  local expected_bundle_id="$1"
+  shift
+
+  local candidate_path=""
+  for candidate_path in "$@"; do
+    if [ -z "$candidate_path" ] || [ ! -f "$candidate_path" ]; then
+      continue
+    fi
+    local candidate_bundle_id=""
+    candidate_bundle_id="$(profile_bundle_id "$candidate_path" 2>/dev/null || true)"
+    if [ -n "$candidate_bundle_id" ]; then
+      printf 'Profile candidate %s has bundle id %s\n' \
+        "$(basename "$candidate_path")" \
+        "$candidate_bundle_id" >&2
+    else
+      printf 'Profile candidate %s could not be decoded as a provisioning profile.\n' \
+        "$(basename "$candidate_path")" >&2
+    fi
+    if [ "$candidate_bundle_id" = "$expected_bundle_id" ]; then
+      printf '%s\n' "$candidate_path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+app_profile_path="$(select_profile_for_bundle \
+  "$app_bundle_id" \
+  "$embedded_app_profile_path" \
+  "${SHORTY_APP_STORE_APP_PROFILE_PATH:-}" \
+  "${SHORTY_DEVELOPER_ID_APP_PROFILE_PATH:-}" || true)"
+extension_profile_path="$(select_profile_for_bundle \
+  "$extension_bundle_id" \
+  "$embedded_extension_profile_path" \
+  "${SHORTY_APP_STORE_EXTENSION_PROFILE_PATH:-}" \
+  "${SHORTY_DEVELOPER_ID_EXTENSION_PROFILE_PATH:-}" || true)"
+
+use_manual_profiles=0
+if [ -n "$app_profile_path" ] && [ -n "$extension_profile_path" ]; then
+  use_manual_profiles=1
+
+  app_profile_uuid="$(extract_profile_value "$app_profile_path" "UUID")"
+  app_profile_name="$(extract_profile_value "$app_profile_path" "Name")"
+  extension_profile_uuid="$(extract_profile_value "$extension_profile_path" "UUID")"
+  extension_profile_name="$(extract_profile_value "$extension_profile_path" "Name")"
+
+  local_profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+  mkdir -p "$local_profiles_dir"
+  cp "$app_profile_path" "$local_profiles_dir/$app_profile_uuid.provisionprofile"
+  cp "$extension_profile_path" "$local_profiles_dir/$extension_profile_uuid.provisionprofile"
+else
+  printf 'App Store profiles for %s and %s were not both available locally; falling back to automatic export.\n' \
+    "$app_bundle_id" "$extension_bundle_id" >&2
+fi
 
 export_options="$REPO_ROOT/.build/app-store/export-options-testflight.plist"
 mkdir -p "$(dirname "$export_options")" "$export_path"
-cat >"$export_options" <<EOF
+if [ "$use_manual_profiles" -eq 1 ]; then
+  cat >"$export_options" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -110,9 +158,9 @@ cat >"$export_options" <<EOF
   <string>manual</string>
   <key>provisioningProfiles</key>
   <dict>
-    <key>app.peyton.shorty.appstore</key>
+    <key>${app_bundle_id}</key>
     <string>${app_profile_name}</string>
-    <key>app.peyton.shorty.appstore.SafariWebExtension</key>
+    <key>${extension_bundle_id}</key>
     <string>${extension_profile_name}</string>
   </dict>
   <key>teamID</key>
@@ -124,12 +172,52 @@ cat >"$export_options" <<EOF
 </dict>
 </plist>
 EOF
+else
+  cat >"$export_options" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>destination</key>
+  <string>export</string>
+  <key>manageAppVersionAndBuildNumber</key>
+  <false/>
+  <key>method</key>
+  <string>app-store-connect</string>
+  <key>signingStyle</key>
+  <string>automatic</string>
+  <key>teamID</key>
+  <string>${TEAM_ID}</string>
+  <key>testFlightInternalTestingOnly</key>
+  <true/>
+  <key>uploadSymbols</key>
+  <true/>
+</dict>
+</plist>
+EOF
+fi
 
-xcodebuild \
-  -exportArchive \
-  -archivePath "$archive_path" \
-  -exportPath "$export_path" \
-  -exportOptionsPlist "$export_options"
+if [ "$use_manual_profiles" -eq 1 ]; then
+  xcodebuild \
+    -exportArchive \
+    -archivePath "$archive_path" \
+    -exportPath "$export_path" \
+    -exportOptionsPlist "$export_options"
+else
+  auth_args=(
+    -authenticationKeyPath "$SHORTY_APP_STORE_CONNECT_KEY_PATH"
+    -authenticationKeyID "$SHORTY_APP_STORE_CONNECT_KEY_ID"
+    -authenticationKeyIssuerID "$SHORTY_APP_STORE_CONNECT_ISSUER_ID"
+  )
+
+  xcodebuild \
+    -exportArchive \
+    -archivePath "$archive_path" \
+    -exportPath "$export_path" \
+    -exportOptionsPlist "$export_options" \
+    -allowProvisioningUpdates \
+    "${auth_args[@]}"
+fi
 
 upload_package="$(find "$export_path" -type f \( -name '*.pkg' -o -name '*.ipa' \) -print -quit)"
 if [ -z "$upload_package" ]; then
