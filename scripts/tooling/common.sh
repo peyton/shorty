@@ -153,6 +153,83 @@ EOF
   return 1
 }
 
+decode_provisioning_profile_to_plist() {
+  local profile_path="$1"
+  local output_path="$2"
+
+  if [ ! -f "$profile_path" ]; then
+    return 1
+  fi
+
+  if security cms -D -i "$profile_path" >"$output_path" 2>/dev/null; then
+    return 0
+  fi
+
+  if openssl smime \
+    -inform der \
+    -verify \
+    -noverify \
+    -in "$profile_path" \
+    -out "$output_path" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  rm -f "$output_path"
+  return 1
+}
+
+provisioning_profile_is_valid() {
+  local profile_path="$1"
+  local profile_plist
+  profile_plist="$(mktemp "${TMPDIR:-/tmp}/shorty-profile.XXXXXX.plist")"
+
+  if decode_provisioning_profile_to_plist "$profile_path" "$profile_plist"; then
+    rm -f "$profile_plist"
+    return 0
+  fi
+
+  rm -f "$profile_plist"
+  return 1
+}
+
+provisioning_profile_value() {
+  local profile_path="$1"
+  local key_path="$2"
+  local profile_plist
+  local status
+  profile_plist="$(mktemp "${TMPDIR:-/tmp}/shorty-profile.XXXXXX.plist")"
+
+  if ! decode_provisioning_profile_to_plist "$profile_path" "$profile_plist"; then
+    rm -f "$profile_plist"
+    return 1
+  fi
+
+  /usr/libexec/PlistBuddy -c "Print :$key_path" "$profile_plist"
+  status=$?
+  rm -f "$profile_plist"
+  return "$status"
+}
+
+provisioning_profile_bundle_id() {
+  local profile_path="$1"
+  local app_identifier=""
+
+  app_identifier="$(provisioning_profile_value \
+    "$profile_path" \
+    "Entitlements:application-identifier" 2>/dev/null || true)"
+  if [ -z "$app_identifier" ]; then
+    app_identifier="$(provisioning_profile_value \
+      "$profile_path" \
+      "Entitlements:com.apple.application-identifier" 2>/dev/null || true)"
+  fi
+
+  if [ -z "$app_identifier" ]; then
+    return 1
+  fi
+
+  printf '%s\n' "${app_identifier#*.}"
+}
+
 generate_workspace() {
   run_in_app run_mise_exec tuist generate --no-open --no-binary-cache --cache-profile none
 }

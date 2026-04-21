@@ -66,23 +66,6 @@ extension_bundle_path="$app_bundle_path/Contents/PlugIns/ShortyAppStoreSafariWeb
 embedded_app_profile_path="$app_bundle_path/Contents/embedded.provisionprofile"
 embedded_extension_profile_path="$extension_bundle_path/Contents/embedded.provisionprofile"
 
-extract_profile_value() {
-  local profile_path="$1"
-  local key_path="$2"
-  local profile_plist
-  profile_plist="$(mktemp "${TMPDIR:-/tmp}/shorty-profile.XXXXXX.plist")"
-  security cms -D -i "$profile_path" >"$profile_plist"
-  /usr/libexec/PlistBuddy -c "Print :$key_path" "$profile_plist"
-  rm -f "$profile_plist"
-}
-
-profile_bundle_id() {
-  local profile_path="$1"
-  local app_identifier
-  app_identifier="$(extract_profile_value "$profile_path" "Entitlements:application-identifier")" || return 1
-  printf '%s\n' "${app_identifier#*.}"
-}
-
 select_profile_for_bundle() {
   local expected_bundle_id="$1"
   shift
@@ -93,11 +76,14 @@ select_profile_for_bundle() {
       continue
     fi
     local candidate_bundle_id=""
-    candidate_bundle_id="$(profile_bundle_id "$candidate_path" 2>/dev/null || true)"
+    candidate_bundle_id="$(provisioning_profile_bundle_id "$candidate_path" 2>/dev/null || true)"
     if [ -n "$candidate_bundle_id" ]; then
       printf 'Profile candidate %s has bundle id %s\n' \
         "$(basename "$candidate_path")" \
         "$candidate_bundle_id" >&2
+    elif provisioning_profile_is_valid "$candidate_path"; then
+      printf 'Profile candidate %s decoded but is missing an application identifier entitlement.\n' \
+        "$(basename "$candidate_path")" >&2
     else
       printf 'Profile candidate %s could not be decoded as a provisioning profile.\n' \
         "$(basename "$candidate_path")" >&2
@@ -126,10 +112,10 @@ use_manual_profiles=0
 if [ -n "$app_profile_path" ] && [ -n "$extension_profile_path" ]; then
   use_manual_profiles=1
 
-  app_profile_uuid="$(extract_profile_value "$app_profile_path" "UUID")"
-  app_profile_name="$(extract_profile_value "$app_profile_path" "Name")"
-  extension_profile_uuid="$(extract_profile_value "$extension_profile_path" "UUID")"
-  extension_profile_name="$(extract_profile_value "$extension_profile_path" "Name")"
+  app_profile_uuid="$(provisioning_profile_value "$app_profile_path" "UUID")"
+  app_profile_name="$(provisioning_profile_value "$app_profile_path" "Name")"
+  extension_profile_uuid="$(provisioning_profile_value "$extension_profile_path" "UUID")"
+  extension_profile_name="$(provisioning_profile_value "$extension_profile_path" "Name")"
 
   local_profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
   mkdir -p "$local_profiles_dir"

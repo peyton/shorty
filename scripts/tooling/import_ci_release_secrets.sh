@@ -29,6 +29,7 @@ write_secret_file() {
 decode_base64_secret_file() {
   local value="$1"
   local destination="$2"
+  local compact_value=""
   (
     umask 077
     if printf '%s' "$value" | base64 --decode >"$destination" 2>/dev/null; then
@@ -38,6 +39,19 @@ decode_base64_secret_file() {
       return 0
     fi
     if printf '%s' "$value" | base64 -D >"$destination" 2>/dev/null; then
+      return 0
+    fi
+    compact_value="$(printf '%s' "$value" | tr -d '[:space:]')"
+    if [ -n "$compact_value" ] &&
+      printf '%s' "$compact_value" | base64 --decode >"$destination" 2>/dev/null; then
+      return 0
+    fi
+    if [ -n "$compact_value" ] &&
+      printf '%s' "$compact_value" | base64 -d >"$destination" 2>/dev/null; then
+      return 0
+    fi
+    if [ -n "$compact_value" ] &&
+      printf '%s' "$compact_value" | base64 -D >"$destination" 2>/dev/null; then
       return 0
     fi
     return 1
@@ -51,7 +65,7 @@ write_profile_file() {
   local decoded_path="$destination.decoded"
 
   if decode_base64_secret_file "$value" "$decoded_path" &&
-    security cms -D -i "$decoded_path" >/dev/null 2>&1; then
+    provisioning_profile_is_valid "$decoded_path"; then
     mv "$decoded_path" "$destination"
     chmod 644 "$destination"
     return 0
@@ -59,7 +73,7 @@ write_profile_file() {
   rm -f "$decoded_path"
 
   write_secret_file "$value" "$destination"
-  if security cms -D -i "$destination" >/dev/null 2>&1; then
+  if provisioning_profile_is_valid "$destination"; then
     chmod 644 "$destination"
     return 0
   fi
